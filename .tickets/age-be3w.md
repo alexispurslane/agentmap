@@ -1,6 +1,6 @@
 ---
 id: age-be3w
-status: open
+status: closed
 deps: [age-6ze2, age-khkw]
 links: []
 created: 2026-11-14T14:48:17Z
