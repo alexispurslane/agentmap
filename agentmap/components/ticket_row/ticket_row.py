@@ -23,7 +23,7 @@ def ticket_row(ticket: Ticket, tickets: Mapping[str, Ticket], links: Mapping[str
     newest_note = ticket.notes[-1].at if ticket.notes else None
     n = len(ticket.notes)
     return render("ticket_row", {
-        **link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ticket.id, "r"),
+        **link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ("t", ticket.id), "r"),
         "dom": element_id("t", ticket.id),
         "state": tier, "age": age_class(now, ticket.changed_at),
         "path": " › ".join(ticket_path(ticket, tickets, root_id)) if tier in ("agent", "recent") else "",

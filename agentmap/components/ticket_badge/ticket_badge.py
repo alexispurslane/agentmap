@@ -9,4 +9,4 @@ def ticket_badge(ticket_id: str, tags: list[str], hue: float | None, place: str)
     first. A hover focuses them and opens the hover box, and a click pins it.
     `place` makes the mark's id unique on the page, for example "b-A2".
     """
-    return render("ticket_badge", {"id": ticket_id, **link_data(tags, hue, ticket_id, place)})
+    return render("ticket_badge", {"id": ticket_id, **link_data(tags, hue, ("t", ticket_id), place)})

@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 
 from agentmap.components import app, page
 from agentmap.components._template import templates
+from agentmap.components.cell_peek.cell_peek import cell_peek
 from agentmap.components.fade.fade import fade
 from agentmap.components.hover.hover import hover
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
@@ -258,7 +259,7 @@ class TicketBadgeTest(unittest.TestCase):
         dom = element_id("t", "ter-icn3")
         o = row(render([thread("a", title="ter-icn3: Unity research")], tickets=self.IDS), "A")
         self.assertIn("$focus = ' A '; $hue = '75.0'; $pin || $peek == '" + dom + "'", o)
-        self.assertIn(f"$pinat = 'b-A-{dom}', @get('/pin/ter-icn3')", o)
+        self.assertIn(f"$pinat = 'b-A-{dom}', @get('/pin/t/ter-icn3')", o)
 
     def test_a_row_without_tickets_keeps_an_empty_badge_slot(self):
         self.assertIn('<span class="tkbs"></span><span class="state">', row(render([thread("a")]), "A"))
@@ -705,3 +706,106 @@ class ForestTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def peek_lines(html):
+    """(path, age, tags) of each file line of a cell box."""
+    return [(p, a, re.findall(r'class="tag"[^>]*>([^<]+)</span>', t)) for p, a, t in re.findall(
+        r'<li class="cf"><span class="cf-path">([^<]*)</span><span class="cf-age">([^<]*)</span>'
+        r'<span class="cf-tags">(.*?)</span></li>', html)]
+
+
+class CellPeekTest(unittest.TestCase):
+    """The box of a map cell: the newest edited files in it, and who edited them."""
+
+    def setUp(self):
+        self.forest = Forest([thread("t", created=60), thread("u", created=50), thread("v", created=40)])
+
+    def box(self, events, key="src/a", pinned=False):
+        return cell_peek(key, CELLS, self.forest, events, NOW, pinned)
+
+    def test_it_lists_the_files_edited_in_the_cell_newest_first_with_their_age(self):
+        html = self.box([event("t", "edits", 30, "src/a/old.py"), event("t", "edits", 2, "src/a/deep/new.py"),
+                         event("t", "edits", 1, "src/b/other.py"), event("t", "edits", 1, "docs/x.md")])
+        self.assertEqual([(p, a) for p, a, _ in peek_lines(html)], [("deep/new.py", "2m"), ("old.py", "30m")])
+
+    def test_each_file_shows_once_with_its_editors_newest_first(self):
+        html = self.box([event("t", "edits", 20, "src/a/x.py"), event("u", "edits", 9, "src/a/x.py"),
+                         event("t", "edits", 5, "src/a/x.py")])
+        self.assertEqual(peek_lines(html), [("x.py", "5m", ["A", "B"])])
+
+    def test_a_directory_cell_holds_the_edits_of_its_subdirectories(self):
+        html = self.box([event("t", "edits", 3, "src/a/x.py"), event("u", "edits", 2, "src/b/y.py")], key="src")
+        self.assertEqual([p for p, *_ in peek_lines(html)], ["b/y.py", "a/x.py"])
+        self.assertIn('<h3 class="peek-title">src/</h3>', html)
+
+    def test_a_hover_box_shows_8_files_and_a_pinned_box_40(self):
+        events = [event("t", "edits", i, f"src/a/f{i}.py") for i in range(1, 50)]
+        self.assertEqual(len(peek_lines(self.box(events))), 8)
+        pinned = self.box(events, pinned=True)
+        self.assertEqual(len(peek_lines(pinned)), 40)
+        self.assertIn('class="close unpin"', pinned)
+        self.assertNotIn("unpin", self.box(events))
+
+    def test_edits_of_threads_without_a_tag_and_other_events_are_left_out(self):
+        html = self.box([event("gone", "edits", 2, "src/a/x.py"), event("t", "status", 1, "src/a/y.py")])
+        self.assertEqual(peek_lines(html), [])
+        self.assertIn('<p class="empty">No agent edited a file here in the event window.</p>', html)
+
+    def test_the_box_shows_only_while_its_cell_is_hovered_or_pinned(self):
+        key = element_id("c", "src/a")
+        self.assertTrue(self.box([]).startswith(f'<div data-show="($pin || $peek) == \'{key}\'">'))
+
+    def test_the_title_of_a_cell_of_root_files_names_no_directory(self):
+        cells = [Cell(".", ".", 1, 0, 0, 100, 100, 1)]
+        html = cell_peek(".", cells, self.forest, [event("t", "edits", 1, "README.md")], NOW)
+        self.assertIn('<h3 class="peek-title">files in the root</h3>', html)
+        self.assertEqual([p for p, *_ in peek_lines(html)], ["README.md"])
+
+
+    def test_each_kind_of_cell_has_a_title_and_shows_paths_inside_its_folder(self):
+        cells = [Cell("src", "src", 1, 0, 0, 500, 600, 1), Cell("src/.", ".", 2, 0, 16, 200, 584, 1),
+                 Cell("src/…", "…", 2, 200, 16, 300, 584, 1), Cell("…", "…", 1, 500, 0, 580, 600, 1)]
+        events = [event("t", "edits", 1, "src/top.py"), event("t", "edits", 2, "src/tiny/x.py"),
+                  event("t", "edits", 3, "lib/y.py")]
+        for key, title, paths in (("src/.", "files in src/", ["top.py"]),
+                                  ("src/…", "small directories in src/", ["tiny/x.py"]),
+                                  ("…", "small directories", ["lib/y.py"])):
+            html = cell_peek(key, cells, self.forest, events, NOW)
+            self.assertIn(f'<h3 class="peek-title">{title}</h3>', html, key)
+            self.assertEqual([p for p, *_ in peek_lines(html)], paths, key)
+
+
+class CellLinkTest(unittest.TestCase):
+    """A map cell is a mark of the threads that edited a file in it."""
+
+    def cell(self, html, key):
+        m = re.search(rf'<div class="cell[^>]*data-cell="{re.escape(key)}"[^>]*>', html)
+        assert m, key
+        return m.group(0)
+
+    def test_a_hover_on_a_cell_focuses_its_editors_and_opens_its_box(self):
+        html = render([thread("t", created=60), thread("u", created=50)],
+                      events=[event("t", "edits", 9, "src/a/x.py"), event("u", "edits", 2, "src/a/y.py")])
+        c = self.cell(html, "src/a")
+        key = element_id("c", "src/a")
+        self.assertIn(f"$focus = ' B A '; $hue = '{Forest([thread('t', created=60), thread('u', created=50)]).hue['u']}'", c)
+        self.assertIn(f"($peek = '{key}', @get('/peek/c/src%2Fa'))", c)
+        self.assertIn(f"$pinat = 'm-{key}', @get('/pin/c/src%2Fa')", c)
+        self.assertIn("data-class:hl=\"$focus.includes(' B ') || $focus.includes(' A ')\"", c)
+
+    def test_a_cell_without_edits_still_opens_its_box_and_lights_for_nobody(self):
+        c = self.cell(render([thread("t")]), "docs")
+        self.assertIn("@get('/peek/c/docs')", c)
+        self.assertIn('data-class:hl="false"', c)
+
+    def test_a_directory_with_subdirectory_cells_is_a_parent(self):
+        # A parent lies under its subdirectories, so it lights only its label.
+        html = render([thread("t")])
+        self.assertRegex(self.cell(html, "src"), r'class="cell d1[^"]* parent')
+        self.assertNotIn("parent", self.cell(html, "docs").split('id=')[0])
+        self.assertNotIn("parent", self.cell(html, "src/a").split('id=')[0])
+
+    def test_the_label_of_the_hovered_or_pinned_cell_anchors_the_box(self):
+        self.assertIn(".cell:hover > .label { anchor-name: --peek; }", CSS)
+        self.assertIn(".cell.pinned > .label { anchor-name: --pin; }", CSS)

@@ -96,6 +96,12 @@ body {
 .cell .label { position: absolute; left: 5px; top: 1px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 14px; font-weight: 600; color: #6b6b6b; white-space: nowrap; }
 .cell.d2 .label { top: 3px; font-weight: 400; font-size: 12px; line-height: 14px; color: #8a8a8a; }
 .cell.busy { background-color: #fff; }
+.cell { cursor: pointer; }
+/* A lit cell takes the focus hue. A parent lies under its subdirectory cells,
+   so only its label lights. */
+.cell.hl:not(.parent) { background-color: oklch(.95 .04 var(--focus-hue)); }
+.cell.parent.hl > .label { color: oklch(.42 .14 var(--focus-hue)); }
+.cell.pinned > .label { color: var(--ink); }
 .routes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 /* --fade squared is the age over an hour, so a route segment loses opacity at a
    steady rate and is gone after an hour. */
@@ -264,6 +270,9 @@ body {
    its bottom padding. */
 .now-item:hover, .tk-head:hover, .tkb:hover { anchor-name: --peek; }
 .now-item.pinned, .tk-head.pinned, .tkb.pinned { anchor-name: --pin; }
+/* A cell can be as tall as the map, so its box opens under its label. */
+.cell:hover > .label { anchor-name: --peek; }
+.cell.pinned > .label { anchor-name: --pin; }
 .peek {
   position: fixed; position-anchor: --peek; top: anchor(bottom); left: anchor(left);
   position-try-fallbacks: flip-block, flip-inline;
@@ -282,4 +291,11 @@ body {
 .peek.open.pinned { transition: none; }
 .unpin { float: right; position: sticky; top: 0; margin: -4px -8px 0 8px; background: var(--ground); }
 .peek-title { margin: 0 0 4px; font-size: 17px; line-height: 1.3; }
+/* A cell's box: one line per edited file, newest first. */
+.cf-list { list-style: none; margin: 0; padding: 0; }
+.cf { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--rule-soft); }
+.cf-path { font: 14px/1.35 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-age { font-size: 13px; color: #737373; }
+.cf-tags { display: flex; gap: 3px; }
+.cf-tags .tag { font-size: 11px; line-height: 16px; min-width: 24px; }
 @media (prefers-reduced-motion: reduce) { .peek, .peek.open { transition: none; } }

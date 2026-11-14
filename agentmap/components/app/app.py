@@ -26,7 +26,7 @@ def app(threads: list[AgentThread], statuses: dict[str, Status], cells: list[Cel
     return render("app", {
         # The rail counts the threads on the board, not the settled subagents.
         "rail": rail(project_name, list(forest.walk()), now),
-        "map": project_map(cells, forest),
+        "map": project_map(cells, forest, events),
         "tree": agent_tree(forest, statuses, now, ticket_ids),
         "log": event_log(events, forest, now),
     })

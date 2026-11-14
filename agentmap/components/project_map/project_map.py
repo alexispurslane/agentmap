@@ -4,7 +4,9 @@ from datetime import datetime
 
 from agentmap.components._template import render
 from agentmap.components.fade.fade import fade_data
-from agentmap.components.view import STATE_CLASS, Forest, element_id
+from agentmap.components.link.link import link_data
+from agentmap.components.view import STATE_CLASS, Forest, cell_edits, cell_threads, element_id
+from agentmap.events import Event
 from agentmap.treemap import Cell, locate
 
 # The map's own coordinates, in CSS px. The server builds the cells at this
@@ -23,14 +25,19 @@ EDGE_EPS = 0.01
 INSET_X, INSET_TOP, INSET_BOTTOM = 14.0, 22.0, 10.0
 
 
-def project_map(cells: list[Cell], forest: Forest) -> str:
+def project_map(cells: list[Cell], forest: Forest, events: list[Event] = ()) -> str:
     """The map module: the treemap, each thread's route, and each thread's dot.
 
     A thread's route runs through the cells of its touched files, oldest to
     newest, and ends at its dot. The newest segment, the one that ends at the
     dot, starts in the full color of the thread. Every segment and every stop
     fades in real time from the time of its touch, so the route fades toward
-    its start, and the route of an agent that stops moving fades away. A hover on the thread draws its whole route at full color.
+    its start, and the route of an agent that stops moving fades away. A hover
+    on the thread draws its whole route at full color.
+
+    A cell is a mark of the threads that edited a file in it (`cell_edits`,
+    from the `edits` events). A hover on the cell lights them and opens the
+    cell's box, and a click pins it; see `link`.
     """
     # The cells each thread touched, newest first, each cell once with its newest time.
     visits: dict[str, list[tuple[Cell, datetime]]] = {}
@@ -88,13 +95,22 @@ def project_map(cells: list[Cell], forest: Forest) -> str:
         left[group[c.key]] = min(left[group[c.key]], c.x)
         top[group[c.key]] = min(top[group[c.key]], c.y)
 
+    edits = cell_edits(cells, forest, list(events))
+
+    def cell_link(c: Cell) -> dict:
+        threads = cell_threads(edits.get(c.key, []))
+        return link_data([forest.tag[t] for t in threads], forest.hue[threads[0]] if threads else None,
+                         ("c", c.key), "m")
+
     return render("project_map", {
         "cells": [{"id": element_id("c", c.key), "key": c.key, "depth": c.depth,
                    "line_l": c.x > left[group[c.key]] + EDGE_EPS,
                    "line_t": c.y > top[group[c.key]] + EDGE_EPS,
+                   "parent": c.depth == 1 and c.key in group.values(),
                    "label": "files" if c.label == "." else c.label, "busy": c.key in busy,
                    "x": round(100 * c.x / MAP_W, 3), "y": round(100 * c.y / MAP_H, 3),
-                   "w": round(100 * c.w / MAP_W, 3), "h": round(100 * c.h / MAP_H, 3)}
+                   "w": round(100 * c.w / MAP_W, 3), "h": round(100 * c.h / MAP_H, 3),
+                   **cell_link(c)}
                   for c in cells],
         "routes": routes,
         "dots": dots,

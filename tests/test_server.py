@@ -10,6 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agentmap.events import Event
 from agentmap.components.view import element_id
 from agentmap.server import CellCache, Dashboard, make_server, sse_patch
 from agentmap.status import StatusStore
@@ -44,7 +45,7 @@ class FakeReader:
         return {"other": False}.get(thread_id, True)
 
     def events(self, now):
-        return []
+        return list(getattr(self, "edits", []))
 
 
 class Clock:
@@ -445,7 +446,7 @@ class TicketFragmentTest(unittest.TestCase):
             self.assertIn(marker, data)
 
     def test_the_pin_route_patches_the_whole_ticket_into_the_box(self):
-        resp, data = self.get(self.serve(), "/pin/ep-1")
+        resp, data = self.get(self.serve(), "/pin/t/ep-1")
         self.assertEqual(resp.status, 200)
         self.assertEqual(resp.getheader("Content-Type"), "text/event-stream")
         self.assertIn(b"data: selector #peek\ndata: mode inner\n", data)
@@ -453,7 +454,7 @@ class TicketFragmentTest(unittest.TestCase):
         self.assertIn(b'class="close unpin"', data)
 
     def test_an_unknown_ticket_cannot_be_pinned(self):
-        resp, _ = self.get(self.serve(), "/pin/nothing")
+        resp, _ = self.get(self.serve(), "/pin/t/nothing")
         self.assertEqual(resp.status, 404)
 
     def test_the_old_ticket_text_route_is_gone(self):
@@ -461,15 +462,33 @@ class TicketFragmentTest(unittest.TestCase):
         self.assertEqual(resp.status, 404)
 
     def test_the_peek_route_patches_the_title_and_description_into_the_peek_box(self):
-        resp, data = self.get(self.serve(), "/peek/ep-1")
+        resp, data = self.get(self.serve(), "/peek/t/ep-1")
         self.assertEqual(resp.status, 200)
         self.assertEqual(resp.getheader("Content-Type"), "text/event-stream")
         self.assertIn(b"data: selector #peek\ndata: mode inner\n", data)
         self.assertIn(b'<h3 class="peek-title">', data)
         self.assertIn(b"Hello <strong>there</strong>.", data)
 
+    def test_the_peek_route_of_a_cell_patches_its_newest_edits_into_the_box(self):
+        self.reader.edits = [Event(T0 - timedelta(minutes=3), "t1", "edits", "src/a/x.py")]
+        resp, data = self.get(self.serve(), "/peek/c/src")
+        self.assertEqual(resp.status, 200)
+        self.assertIn(b"data: selector #peek\ndata: mode inner\n", data)
+        self.assertIn(b'<span class="cf-path">a/x.py</span>', data)
+        self.assertNotIn(b"unpin", data)
+
+    def test_the_pin_route_of_a_cell_adds_the_unpin_button(self):
+        resp, data = self.get(self.serve(), "/pin/c/src")
+        self.assertEqual(resp.status, 200)
+        self.assertIn(b'class="close unpin"', data)
+
+    def test_an_unknown_cell_or_kind_has_no_box(self):
+        port = self.serve()
+        for path in ("/peek/c/nowhere", "/pin/c/nowhere", "/peek/x/src", "/peek/src"):
+            self.assertEqual(self.get(port, path)[0].status, 404, path)
+
     def test_an_unknown_ticket_has_no_peek(self):
-        resp, _ = self.get(self.serve(), "/peek/nothing")
+        resp, _ = self.get(self.serve(), "/peek/t/nothing")
         self.assertEqual(resp.status, 404)
 
     def test_a_stream_sends_all_fragments_then_only_the_changed_ones(self):

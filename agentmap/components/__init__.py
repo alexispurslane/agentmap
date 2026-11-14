@@ -11,6 +11,7 @@ from agentmap.components.app.app import app
 from agentmap.components.epic_strip.epic_strip import epic_strip
 from agentmap.components.page.page import page
 from agentmap.components.ticket_lists.ticket_lists import ticket_lists
+from agentmap.components.cell_peek.cell_peek import cell_peek
 from agentmap.components.ticket_peek.ticket_peek import ticket_peek
 
-__all__ = ["app", "epic_strip", "page", "ticket_lists", "ticket_peek"]
+__all__ = ["app", "cell_peek", "epic_strip", "page", "ticket_lists", "ticket_peek"]

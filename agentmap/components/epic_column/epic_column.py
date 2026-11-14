@@ -56,7 +56,7 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
 def _link(workers: list[str], forest: Forest, ticket_id: str | None = None, place: str = "") -> dict:
     """The `{{> link}}` data of a mark that these threads work on."""
     return link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None,
-                     ticket_id, place)
+                     ("t", ticket_id) if ticket_id is not None else None, place)
 
 
 def _ago(delta) -> str:

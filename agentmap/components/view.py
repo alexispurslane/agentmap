@@ -13,9 +13,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from agentmap.events import Event
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
 from agentmap.tickets import Group, Ticket, blocked_by, groups
+from agentmap.treemap import ELLIPSIS, ROOT_FILES, Cell, locate
 
 # Each thread gets its own OKLCH hue. In order of creation, each hue is the
 # one before plus the golden angle, so threads close in that order get hues
@@ -276,3 +278,69 @@ def ticket_path(ticket: Ticket, tickets: Mapping[str, Ticket], root_id: str | No
         seen.add(ticket.id)
         path.append(ticket.id)
     return path[::-1]
+
+
+@dataclass(frozen=True)
+class FileEdit:
+    """One file that agents edited, as a map cell's box shows it.
+
+    `path` is project-relative. `at` is the time of its newest edit.
+    `threads` are the ids of the threads that edited it, newest editor first.
+    """
+
+    path: str
+    at: datetime
+    threads: tuple[str, ...]
+
+
+def cell_edits(cells: list[Cell], forest: Forest, events: list[Event]) -> dict[str, list[FileEdit]]:
+    """The edited files of each map cell that has some, newest first.
+
+    A file is in the cell that `locate` gives for its path, and also in the
+    directory cell above that cell. The edits are the `edits` events of
+    threads with a tag; an edit of another thread has no mark to link to.
+    """
+    found: dict[str, list[Event]] = defaultdict(list)
+    for e in events:
+        if e.kind == "edits" and e.thread_id in forest.tag:
+            found[e.text].append(e)
+    by_cell: dict[str, list[FileEdit]] = defaultdict(list)
+    for path, edits in found.items():
+        cell = locate(cells, path)
+        if cell is None:
+            continue
+        edits.sort(key=lambda e: e.at, reverse=True)
+        edit = FileEdit(path, edits[0].at, tuple(dict.fromkeys(e.thread_id for e in edits)))
+        by_cell[cell.key].append(edit)
+        if cell.depth == 2:
+            by_cell[cell.key.split("/")[0]].append(edit)
+    for files in by_cell.values():
+        files.sort(key=lambda f: (f.at, f.path), reverse=True)
+    return dict(by_cell)
+
+
+def cell_threads(files: list[FileEdit]) -> list[str]:
+    """The threads that edited these files, newest editor first, each once."""
+    return list(dict.fromkeys(t for f in files for t in f.threads))
+
+
+def cell_dir(key: str) -> str:
+    """The folder of a cell's files with a final `/`, or "" for the root and the top `…` cell."""
+    if key in (ROOT_FILES, ELLIPSIS):
+        return ""
+    top, _, sub = key.partition("/")
+    return f"{top}/" if sub in ("", ROOT_FILES, ELLIPSIS) else f"{key}/"
+
+
+def cell_title(key: str) -> str:
+    """The title of a cell's box: its folder, or what the cell holds."""
+    top, _, sub = key.partition("/")
+    if key == ROOT_FILES:
+        return "files in the root"
+    if key == ELLIPSIS:
+        return "small directories"
+    if sub == ROOT_FILES:
+        return f"files in {top}/"
+    if sub == ELLIPSIS:
+        return f"small directories in {top}/"
+    return f"{key}/"

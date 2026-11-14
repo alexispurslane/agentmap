@@ -22,7 +22,7 @@ from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from agentmap import mcp
-from agentmap.components import app, epic_strip, page, ticket_lists, ticket_peek
+from agentmap.components import app, cell_peek, epic_strip, page, ticket_lists, ticket_peek
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.view import Forest, active_groups, ticket_agents
 from agentmap.t3 import anchors
@@ -112,6 +112,8 @@ class Dashboard:
         self._last_cells = None
         self._last_tickets = None
         self._last_ticket_key = None
+        # What the newest render drew: (cells, forest, events, now), for the boxes of map cells.
+        self.view: tuple = ([], Forest([]), [], clock())
 
     def tick(self) -> bool:
         """Render again if anything changed or the refresh interval passed.
@@ -132,6 +134,7 @@ class Dashboard:
         threads = self.reader.snapshot(now)
         fragments = {"app": app(threads, statuses, cells, events, now, self.project_name, tickets.keys())}
         forest = Forest(threads)
+        self.view = (cells, forest, events, now)
         links = ticket_agents(forest, statuses, tickets.keys())
         # The ticket fragments are large, so they render again only when the
         # tickets, the threads that work on them, or the ages may have changed.
@@ -205,9 +208,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, page(f["app"], f["epics"], f["tickets"]).encode(),
                        {"Content-Type": "text/html; charset=utf-8"})
         elif path.startswith("/peek/"):
-            self._box(unquote(path[len("/peek/"):]), pinned=False)
+            self._box(path[len("/peek/"):], pinned=False)
         elif path.startswith("/pin/"):
-            self._box(unquote(path[len("/pin/"):]), pinned=True)
+            self._box(path[len("/pin/"):], pinned=True)
         elif path == "/stream":
             self._stream()
         elif path.startswith("/static/") and path[len("/static/"):] in STATIC:
@@ -260,14 +263,26 @@ class _Handler(BaseHTTPRequestHandler):
     def _error(self, status: int, text: str, extra: dict[str, str] | None = None) -> None:
         self._send(status, f"{text}\n".encode(), {"Content-Type": "text/plain", **(extra or {})})
 
-    def _box(self, ticket_id: str, pinned: bool) -> None:
-        """One ticket's hover box, or its pinned box with the notes, as an inner patch of #peek."""
-        source = self.dashboard.tickets
-        found = source.tickets().get(ticket_id) if source is not None else None
-        if found is None:
-            self._error(404, "no such ticket")
+    def _box(self, subject: str, pinned: bool) -> None:
+        """The box of a subject `<kind>/<quoted id>`, as an inner patch of #peek.
+
+        The kind `t` is a ticket: its hover box, or its pinned box with the notes.
+        The kind `c` is a map cell of the newest render: its edited files.
+        """
+        kind, _, raw = subject.partition("/")
+        key = unquote(raw)
+        html = None
+        if kind == "t" and self.dashboard.tickets is not None:
+            found = self.dashboard.tickets.tickets().get(key)
+            html = ticket_peek(found, pinned) if found is not None else None
+        elif kind == "c":
+            cells, forest, events, now = self.dashboard.view
+            if any(c.key == key for c in cells):
+                html = cell_peek(key, cells, forest, events, now, pinned)
+        if html is None:
+            self._error(404, "no such box")
             return
-        self._send(200, sse_patch(ticket_peek(found, pinned), selector="#peek", mode="inner"),
+        self._send(200, sse_patch(html, selector="#peek", mode="inner"),
                    {"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
 
     def _stream(self) -> None:

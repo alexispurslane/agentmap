@@ -61,10 +61,10 @@ EPIC = [
 # focuses A and peeks at the ticket unless a box is pinned. A click pins the box
 # to this mark, or unpins it. `{mark}` is the mark's id, unique on the page.
 PEEK = ('data-on:mouseover__stop="$focus = \' A \'; $hue = \'75.0\'; '
-        '$pin || $peek == \'{dom}\' || ($peek = \'{dom}\', @get(\'/peek/{url}\'))" '
+        '$pin || $peek == \'{dom}\' || ($peek = \'{dom}\', @get(\'/peek/t/{url}\'))" '
         'data-on:mouseleave="$focus = \'\'; $peek = \'\'" '
         'data-on:click__stop="$pinat == \'{mark}\' ? ($pin = \'\', $pinat = \'\') : '
-        '($pin = \'{dom}\', $pinat = \'{mark}\', @get(\'/pin/{url}\'))" '
+        '($pin = \'{dom}\', $pinat = \'{mark}\', @get(\'/pin/t/{url}\'))" '
         'data-class:pinned="$pinat == \'{mark}\'" '
         'data-class:hl="$focus.includes(\' A \')"')
 WORKER = [thread("t1", "ter-69s8: build the cap")]
@@ -302,11 +302,11 @@ class TicketListTest(unittest.TestCase):
         r = row(board(EPIC)[1], "ter-69s8")
         self.assertNotIn("tk-body", r)
         self.assertNotIn("$ticket", r)
-        self.assertIn("@get('/pin/ter-69s8')", r)
+        self.assertIn("@get('/pin/t/ter-69s8')", r)
 
     def test_an_id_with_unsafe_characters_is_quoted_in_the_url(self):
         r = row(board([ticket("odd'id", status="in_progress")])[1], "odd'id")
-        self.assertIn("@get('/pin/odd%27id')", r)
+        self.assertIn("@get('/pin/t/odd%27id')", r)
 
     def test_a_list_has_a_close_button_and_a_note_for_a_group_that_is_gone(self):
         _, lists = board(EPIC)
@@ -362,7 +362,7 @@ class TicketPeekTest(unittest.TestCase):
 
     def test_the_link_attributes_quote_the_id_in_the_url(self):
         dom = element_id("t", "odd'id")
-        self.assertEqual(link(["A"], 75.0, "odd'id", "b"), PEEK.format(dom=dom, url="odd%27id", mark="b-" + dom))
+        self.assertEqual(link(["A"], 75.0, ("t", "odd'id"), "b"), PEEK.format(dom=dom, url="odd%27id", mark="b-" + dom))
 
     def test_the_peek_box_is_placed_next_to_the_hovered_ticket_by_css_anchors(self):
         # The element under the pointer is the anchor. A ticket can show in its
