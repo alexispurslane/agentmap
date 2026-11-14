@@ -27,7 +27,7 @@ agentmap joins three views of the same threads that neither Claude Code nor Code
 
 - T3 Code runs the threads. agentmap reads T3 Code's database read-only and polls it every 250 ms.
 - The page is a live HTML page. The server sends the whole app as Datastar HTML fragments over Server-Sent Events, and Datastar morphs the changes in.
-- The page is watched, not operated. Its only interaction is the hover link between a thread's map dot and its card.
+- The page is watched, not operated. Its interactions are the hover link between a thread's map dot and its card, the ticket list of an epic, and a hover box with a ticket's description.
 
 ## Capabilities and Constraints
 

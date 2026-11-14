@@ -3,6 +3,7 @@ from datetime import datetime
 
 from agentmap.components._template import render
 from agentmap.components.agent_chip.agent_chip import agent_chip
+from agentmap.components.peek.peek import peek_data
 from agentmap.components.view import Forest, age_class, format_age, group_key, group_threads, element_id, ticket_state
 from agentmap.tickets import Group, Ticket
 
@@ -14,7 +15,8 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
                 forest: Forest, now: datetime) -> str:
     """One group in the epic strip: its title, counts, progress bar, agents and newest change.
 
-    A click opens the group's ticket list in place of the event log.
+    A click opens the group's ticket list in place of the event log. A hover on
+    a ticket in progress opens that ticket's hover box.
     """
     states = [ticket_state(t, tickets) for t in group.members]
     total = len(group.members) + group.closed
@@ -24,7 +26,7 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
     root = group.root
     working = [t for t in group.members if t.status == "in_progress"]
     return render("epic_column", {
-        "now": [{"id": t.id, "title": t.title,
+        "now": [{"id": t.id, "title": t.title, **peek_data(t.id),
                  "agents": [agent_chip(forest.tag[a], forest.hue[a]) for a in links.get(t.id, [])]}
                 for t in working[:NOW_MAX]],
         "more": len(working) - NOW_MAX if len(working) > NOW_MAX else 0,

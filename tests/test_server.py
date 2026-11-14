@@ -450,6 +450,18 @@ class TicketFragmentTest(unittest.TestCase):
         resp, _ = self.get(self.serve(), "/ticket/nothing")
         self.assertEqual(resp.status, 404)
 
+    def test_the_peek_route_patches_the_title_and_description_into_the_peek_box(self):
+        resp, data = self.get(self.serve(), "/peek/ep-1")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.getheader("Content-Type"), "text/event-stream")
+        self.assertIn(b"data: selector #peek\ndata: mode inner\n", data)
+        self.assertIn(b'<h3 class="peek-title">', data)
+        self.assertIn(b"Hello <strong>there</strong>.", data)
+
+    def test_an_unknown_ticket_has_no_peek(self):
+        resp, _ = self.get(self.serve(), "/peek/nothing")
+        self.assertEqual(resp.status, 404)
+
     def test_a_stream_sends_all_fragments_then_only_the_changed_ones(self):
         port = self.serve()
         sock = socket.create_connection(("127.0.0.1", port), timeout=5)
