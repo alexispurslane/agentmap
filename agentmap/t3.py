@@ -85,7 +85,11 @@ class AgentThread:
     thread (running, completed, failed, cancelled, interrupted), or None for a
     thread that got no task. `settled_at` is when T3 Code marked the thread
     settled (the user did it, or T3 did it for an ended subagent), or None
-    for a thread without the mark or one that the user unsettled.
+    for a thread without the mark or one that the user unsettled. `active_at`
+    is when the thread's agent last acted: the latest start or end of its
+    newest ACTIVE_SCAN turn items, or `created_at` for a thread without items.
+    It differs from `updated_at`, which T3 Code also moves without agent work,
+    for example when it settles the thread.
     """
 
     id: str
@@ -104,6 +108,7 @@ class AgentThread:
     touched: tuple[Touch, ...]
     delegation: str | None = None
     settled_at: datetime | None = None
+    active_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,7 @@ class _Details:
     said: tuple[str, datetime] | None
     touched: tuple[Touch, ...]
     touched_ordinal: int  # The newest ordinal that the touched scan has seen.
+    active_at: datetime | None  # The latest start or end of the newest items.
 
 
 @dataclass(frozen=True)
@@ -142,6 +148,9 @@ class _Log:
     node_id: str | None  # The subagent item's node, for a thread without runs.
     said: str  # The first sentence of the newest message, for a thread without runs.
 
+
+# How many of a thread's newest turn items the scan for `active_at` reads.
+ACTIVE_SCAN = 50
 
 # The MCP server name that the harness configurations give agentmap.
 SERVER_NAME = "agentmap"
@@ -333,7 +342,8 @@ class T3Reader:
             now=details.now, thought=_text_of(details.thought),
             last_said=_text_of(details.said), thought_at=_time_of(details.thought),
             said_at=_time_of(details.said), touched=details.touched,
-            delegation=self._delegation(thread_id), settled_at=_settled_at(payload))
+            delegation=self._delegation(thread_id), settled_at=_settled_at(payload),
+            active_at=details.active_at or _parse(created_at))
 
     def _delegation(self, thread_id: str) -> str | None:
         """The status of the newest delegation record whose child is this thread.
@@ -385,7 +395,18 @@ class T3Reader:
         return _Details(needs_you=needs_you, now=now,
                         thought=self._newest_sentence("thread_id", thread_id, "reasoning"),
                         said=self._newest_sentence("thread_id", thread_id, "assistant_message"),
-                        touched=touched, touched_ordinal=touched_ordinal)
+                        touched=touched, touched_ordinal=touched_ordinal,
+                        active_at=self._active_at(thread_id))
+
+    def _active_at(self, thread_id: str) -> datetime | None:
+        """The latest start or end of the thread's newest ACTIVE_SCAN items, or None."""
+        row = self._conn.execute(
+            "SELECT max(max(coalesce(json_extract(payload_json, '$.startedAt'), ''),"
+            " coalesce(json_extract(payload_json, '$.completedAt'), '')))"
+            " FROM (SELECT payload_json FROM orchestration_v2_projection_turn_items"
+            " WHERE thread_id = ? ORDER BY ordinal DESC LIMIT ?)",
+            (thread_id, ACTIVE_SCAN)).fetchone()
+        return _parse(row[0]) if row and row[0] else None
 
     def _newest_sentence(self, column: str, value: str,
                          type_: str) -> tuple[str, datetime] | None:

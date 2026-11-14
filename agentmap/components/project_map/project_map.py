@@ -26,9 +26,9 @@ def project_map(cells: list[Cell], forest: Forest) -> str:
 
     A thread's route runs through the cells of its touched files, oldest to
     newest, and ends at its dot. The newest segment, the one that ends at the
-    dot, has the full color of the thread. Every older segment and every stop
+    dot, starts in the full color of the thread. Every segment and every stop
     fades in real time from the time of its touch, so the route fades toward
-    its start. A hover on the thread draws its whole route at full color.
+    its start, and the route of an agent that stops moving fades away. A hover on the thread draws its whole route at full color.
     """
     # The cells each thread touched, newest first, each cell once with its newest time.
     visits: dict[str, list[tuple[Cell, datetime]]] = {}

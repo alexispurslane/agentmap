@@ -33,8 +33,10 @@ def fades(minutes):
 def thread(id, parent=None, *, title=None, created=60, updated=0, state="working",
            now=None, thought=None, thought_at=None, last_said=None, said_at=None,
            touched=(), provider="claude", model="claude-opus-5-5", delegation=None,
-           settled_at=None):
+           settled_at=None, active=None):
     """A thread created `created` and updated `updated` minutes before NOW.
+
+    Its agent last acted `active` minutes before NOW, by default when it was updated.
 
     `touched` holds paths (touched 1 minute apart, newest first) or (path, minutes) pairs.
     """
@@ -45,7 +47,8 @@ def thread(id, parent=None, *, title=None, created=60, updated=0, state="working
         model=model, state=state, created_at=ago(created), updated_at=ago(updated),
         now=now, thought=thought, thought_at=None if thought_at is None else ago(thought_at),
         last_said=last_said, said_at=None if said_at is None else ago(said_at), touched=touches,
-        delegation=delegation, settled_at=None if settled_at is None else ago(settled_at))
+        delegation=delegation, settled_at=None if settled_at is None else ago(settled_at),
+        active_at=ago(updated if active is None else active))
 
 
 def status(text, minutes=0):
@@ -440,10 +443,20 @@ class AgentRowTest(unittest.TestCase):
         for label in ("working", "needs you", "idle 12m", "failed 3m"):
             self.assertIn(f'<span class="state">{label}</span>', html)
 
-    def test_a_row_fades_by_the_threads_last_update(self):
-        o = opening(render([thread("t", state="idle", updated=6)]), "A")
+    def test_an_idle_row_fades_from_its_agents_last_act_not_its_last_update(self):
+        # T3 Code moves updated_at when it settles a thread, and for other reasons.
+        o = opening(render([thread("t", state="idle", updated=0, active=40)]), "A")
         self.assertTrue(o.startswith('<article class="row idle" '), o)
-        self.assertIn(fades(6), o)
+        self.assertIn(fades(40), o)
+
+    def test_a_row_whose_agent_acts_now_has_full_ink(self):
+        for state in ("working", "needs_you"):
+            self.assertIn(fades(0), opening(render([thread("t", state=state, active=40)]), "A"))
+
+    def test_the_idle_age_and_the_one_line_form_count_from_the_last_act(self):
+        html = render([thread("r"), thread("k", "r", state="idle", created=50, updated=0, active=25)])
+        self.assertIn('<span class="state">idle 25m</span>', html)
+        self.assertIn("compact", opening(html, "A1"))
 
     def test_an_idle_child_quiet_for_over_ten_minutes_is_one_line(self):
         html = render([thread("r"), thread("old", "r", state="idle", created=50, updated=11,
@@ -516,11 +529,11 @@ class MapTest(unittest.TestCase):
         self.assertAlmostEqual(float(segments[-1][3]) / MAP_W * 100, x, places=1)
         self.assertAlmostEqual(float(segments[-1][4]) / MAP_H * 100, y, places=1)
 
-    def test_older_segments_and_stops_fade_by_the_time_of_their_touch_the_newest_does_not(self):
-        html = render([thread("t", touched=[("docs/a", 0), ("src/b/x", 7), ("src/a/y", 40)])])
+    def test_every_segment_and_stop_fades_by_the_time_of_its_touch(self):
+        html = render([thread("t", touched=[("docs/a", 3), ("src/b/x", 7), ("src/a/y", 40)])])
         route = re.search(r'<g style="--hue:[0-9.]+"[^>]*>(.*?)</g>', html).group(1)
         self.assertRegex(route, rf'<path class="route" d="[^"]+" {re.escape(fades(7))}/>')
-        self.assertRegex(route, r'<path class="route now" d="[^"]+"/>')
+        self.assertRegex(route, rf'<path class="route now" d="[^"]+" {re.escape(fades(3))}/>')
         self.assertEqual(re.findall(r'<circle class="stop" [^>]*?(data-style:--fade="[^"]*")/>', route),
                          [fades(40), fades(7)])
 

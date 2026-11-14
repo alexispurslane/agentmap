@@ -21,7 +21,10 @@ def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
     `badges` are the HTML of its ticket badges, which sit in a fixed slot before
     the state. `title` replaces the thread's title, for example without its ids.
     """
-    age = format_age(now - thread.updated_at)
+    # A row fades from its agent's last act. An agent that works or waits on the
+    # user acts now, so its row has full ink.
+    acted = now if thread.state in ("working", "needs_you") else thread.active_at
+    age = format_age(now - acted)
     line = summary(thread, status)
     meta = " · ".join(x for x in (thread.provider, thread.model) if x)
     return render("agent_row", {
@@ -34,9 +37,9 @@ def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
         "state": STATE_CLASS[thread.state],
         "state_label": {"working": "working", "needs_you": "needs you",
                         "idle": f"idle {age}", "failed": f"failed {age}"}[thread.state],
-        **fade_data(thread.updated_at),
+        **fade_data(acted),
         "compact": (not is_root and thread.state == "idle"
-                    and now - thread.updated_at > COMPACT_AFTER),
+                    and now - acted > COMPACT_AFTER),
         "tool": thread.now,
         "summary": line and {"kind": line.kind, "text": line.text, **fade_data(line.at)},
         "meta": f"{meta} · started {format_age(now - thread.created_at)} ago",

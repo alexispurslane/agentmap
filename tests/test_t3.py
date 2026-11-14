@@ -358,6 +358,37 @@ class SettleMark(unittest.TestCase):
         self.assertIsNone(self.settled_at(settled=5, override="unsettled"))
 
 
+class ActiveAt(unittest.TestCase):
+    """`active_at` is when the thread's agent last acted: the newest start or end of its items."""
+
+    def setUp(self):
+        self.f = Fixture(self)
+        self.f.thread("t", created=60, updated=1)
+
+    def active_at(self):
+        return by_id(self.f.reader(self).snapshot(NOW))["t"].active_at
+
+    def test_it_is_the_start_of_the_newest_item(self):
+        self.f.item("t", "reasoning", started=30, text="Old.")
+        self.f.item("t", "reasoning", started=12, text="New.")
+        self.assertEqual(self.active_at(), NOW - timedelta(minutes=12))
+
+    def test_it_is_the_end_of_an_item_that_ended_after_newer_items_started(self):
+        self.f.item("t", "command_execution", started=30, completedAt=stamp(4))
+        self.f.item("t", "reasoning", started=12, completedAt=stamp(11), text="Meanwhile.")
+        self.assertEqual(self.active_at(), NOW - timedelta(minutes=4))
+
+    def test_a_move_of_updated_at_alone_does_not_change_it(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "reasoning", started=30, text="Done.")
+        self.assertEqual(by_id(reader.snapshot(NOW))["t"].active_at, NOW - timedelta(minutes=30))
+        self.f.touch("t", updated=0)
+        self.assertEqual(by_id(reader.snapshot(NOW))["t"].active_at, NOW - timedelta(minutes=30))
+
+    def test_a_thread_without_items_last_acted_when_it_was_created(self):
+        self.assertEqual(self.active_at(), NOW - timedelta(minutes=60))
+
+
 class NativeSubagentState(unittest.TestCase):
     """A subagent from Claude's Agent tool has no runs. Its parent's subagent item stands for its run."""
 

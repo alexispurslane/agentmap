@@ -91,7 +91,7 @@ body {
 /* --fade squared is the age over an hour, so a route segment loses opacity at a
    steady rate and is gone after an hour. */
 .route { fill: none; stroke: oklch(.6 .16 var(--hue)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); }
-.route.now { stroke: oklch(.56 .17 var(--hue)); stroke-opacity: 1; }
+.route.now { stroke: oklch(.56 .17 var(--hue)); stroke-opacity: calc(1 - var(--fade) * var(--fade)); }
 .stop { fill: #fff; stroke: oklch(.6 .16 var(--hue)); stroke-width: 3; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); fill-opacity: calc(1 - var(--fade) * var(--fade)); }
 .routes g.hl .route, .routes g.hl .stop { stroke-opacity: 1; fill-opacity: 1; }
 .routes g.hl .route { stroke-width: 7; }

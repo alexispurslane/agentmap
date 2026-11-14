@@ -170,6 +170,7 @@ class T3Reader:
 | `model` | The model name from `modelSelection.model`, or `None`. |
 | `state` | One of `working`, `needs_you`, `idle`, `failed`. |
 | `created_at`, `updated_at` | Timezone-aware datetimes. |
+| `active_at` | When the thread's agent last acted: the latest `startedAt` or `completedAt` of its newest 50 turn items, or `created_at` for a thread without items. T3 Code also moves `updated_at` without agent work, for example when it settles a thread, so the page uses `active_at` for ages. |
 | `now` | The now line, or `None`. |
 | `thought` | The first sentence of the newest thinking text, at most 160 characters, or `None`. |
 | `last_said` | The first sentence of the newest assistant message, at most 160 characters, or `None`. |
@@ -277,8 +278,8 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 - Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°).
 - Every mark is linked through the focus: the signals `$focus` (a set of thread tags) and `$hue`. A thread mark (dot, route, row, event, chip) uses `{{> hover}}`. A ticket mark (epic column, ticket, ticket row) uses `{{> link}}`. See `docs/plans/live-tickets.md`.
 - Map routes and agent rows fade in real time. The page keeps the Unix time in the signal `$now` and sets it every 10 seconds. The `fade` component gives a mark the attribute `data-style:--fade`. Its value grows from 0 at the mark's time to 1 after an hour, as the square root of the age.
-- In the CSS, a route segment and a stop lose opacity at a steady rate (`1 - --fade²`) and are gone after an hour. The newest segment, the one that ends at the dot, does not fade and has the full color of the thread. A hover on a thread draws its whole route at full color.
-- An agent row's title and summary text mix from full ink to grey with `--fade`. Its tag badge gets a little lighter and less saturated, so that the tags stay readable and distinct.
+- In the CSS, a route segment and a stop lose opacity at a steady rate (`1 - --fade²`) and are gone after an hour. The newest segment, the one that ends at the dot, starts in the full color of the thread and fades from full opacity in the same way. A hover on a thread draws its whole route at full color.
+- An agent row fades from its `active_at`, and its idle age counts from the same time. A row that is working or that needs the user has full ink, because its agent acts now. Its title and summary text mix from full ink to grey with `--fade`. Its tag badge gets a little lighter and less saturated, so that the tags stay readable and distinct.
 - The event log, the epic strip and the ticket list still use the ink ramp `a0` to `a4`, which the server sets when it renders.
 - Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`.
 - An agent row shows its tool line (the now line) and one summary line: the newest of its status line, its last message and its newest thought.
