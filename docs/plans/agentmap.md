@@ -20,7 +20,7 @@ The user chose these points on 2026-11-14:
 
 Other fixed points:
 
-- The backend uses the Python 3 standard library only. Test tools (coverage, pytest, mutmut) come from the Nix dev shell.
+- The backend uses the Python 3.14 standard library only. Test tools (coverage, pytest, mutmut) come from the Nix dev shell.
 - The frontend is Datastar 1.0.5, vendored in `agentmap/static/datastar.js`. The server sends HTML fragments. The page has no other script.
 - One server process watches one project. It serves the page, the event stream and the MCP endpoint on one port.
 
@@ -269,9 +269,9 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 ### render.py: the HTML
 
 ```python
-def render_page(app_html: str) -> str: ...
+def render_page(app_html: str) -> Safe: ...
 def render_app(threads: list[AgentThread], plans: dict[str, Plan], cells: list[Cell],
-               now: datetime, project_name: str) -> str: ...
+               now: datetime, project_name: str) -> Safe: ...
 ```
 
 - `render_page` returns the whole document. The body has `data-init="@get('/stream', {openWhenHidden: true})"`.
@@ -283,7 +283,7 @@ def render_app(threads: list[AgentThread], plans: dict[str, Plan], cells: list[C
 - A cell with the key `.` or `<dir>/.` has the label `files`.
 - A plan shows its goal, then its items. A done top-level item shows as one line with a count, for example `✓ Diagnose budget overrun (3/3)`.
 - An idle child thread whose `updated_at` is more than 10 minutes old shows as one line.
-- All text goes through `html.escape`.
+- All HTML is built with t-strings (PEP 750, Python 3.14) and `markup.html()`. `html()` escapes every interpolated value. The only exception is a `Safe` value, which is HTML that `html()` already made. Do not build HTML with f-strings.
 - The page is for a portrait screen of about 1080 × 1920 CSS pixels. The map takes about the top third.
 
 ### server.py and `__main__.py`
