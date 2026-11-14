@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 
 from agentmap.components import app, page
 from agentmap.components._template import templates
+from agentmap.components.fade.fade import fade
 from agentmap.components.hover.hover import hover
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.tag.tag import tag
@@ -22,6 +23,11 @@ NOW = datetime(2026, 11, 14, 15, 0, tzinfo=timezone.utc)
 
 def ago(minutes):
     return NOW - timedelta(minutes=minutes)
+
+
+def fades(minutes):
+    """The fade attribute of a mark made `minutes` before NOW."""
+    return fade(ago(minutes))
 
 
 def thread(id, parent=None, *, title=None, created=60, updated=0, state="working",
@@ -204,12 +210,31 @@ class TemplateTest(unittest.TestCase):
                          "data-class:hl=\"$hover == 'A1'\"")
 
 
+class FadeTest(unittest.TestCase):
+    def test_a_fade_follows_the_clock_signal_from_the_marks_time(self):
+        self.assertEqual(fade(datetime(2026, 11, 14, 15, 0, tzinfo=timezone.utc)),
+                         'data-style:--fade="Math.min(1, Math.sqrt(Math.max(0, $now - 1794668400) / 3600))"')
+
+    def test_a_mark_without_a_time_is_fully_faded(self):
+        self.assertIn("$now - 0)", fade(None))
+
+    def test_the_page_ticks_the_clock_signal_every_ten_seconds(self):
+        body = re.search(r"<body[^>]*>", page("", "", "")).group(0)
+        self.assertIn("now: Date.now() / 1000", body)
+        self.assertIn("setInterval(() =&gt; $now = Date.now() / 1000, 10000)", body)
+
+    def test_the_fade_is_a_registered_number_that_moves_smoothly(self):
+        self.assertIn("@property --fade { syntax: '<number>'; inherits: true; initial-value: 0; }", CSS)
+        # A transition would start every mark at --fade 0 on page load.
+        self.assertNotIn("transition: --fade", CSS)
+
+
 class PageTest(unittest.TestCase):
     def test_the_page_opens_the_stream_and_declares_the_hover_signal_on_body(self):
         html = page('<main id="app"></main>', "", "")
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: ''}\"", body)
-        self.assertIn("data-init=\"@get('/stream', {openWhenHidden: true})\"", body)
+        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-init=\"@get('/stream', {openWhenHidden: true});", body)
         self.assertIn('src="/static/datastar.js"', html)
         self.assertIn('<link rel="stylesheet" href="/static/app.css">', html)
         self.assertIn('<main id="app"></main>', html)
@@ -353,13 +378,13 @@ class AgentRowTest(unittest.TestCase):
                                thought_at=0, last_said="Old news.", said_at=20)]), "A")
         self.assertRegex(r, r'<div class="line tool"><span class="lbl">tool</span>'
                             r'<span class="text">Editing src/a/x.py</span></div>')
-        self.assertRegex(r, r'<div class="line thought a0"><span class="lbl">thought</span>'
+        self.assertRegex(r, r'<div class="line thought" data-style:--fade="[^"]+"><span class="lbl">thought</span>'
                             r'<span class="text">The cap goes first.</span></div>')
         self.assertNotIn("Old news.", r)
 
-    def test_the_summary_line_is_inked_by_its_own_age(self):
+    def test_the_summary_line_fades_by_its_own_time(self):
         r = row(render([thread("t", last_said="Said.", said_at=20)]), "A")
-        self.assertIn('class="line said a3"', r)
+        self.assertIn(f'<div class="line said" {fades(20)}>', r)
 
     def test_an_idle_row_has_no_tool_line(self):
         self.assertNotIn("line tool", row(render([thread("t", state="idle")]), "A"))
@@ -377,8 +402,10 @@ class AgentRowTest(unittest.TestCase):
         for label in ("working", "needs you", "idle 12m", "failed 3m"):
             self.assertIn(f'<span class="state">{label}</span>', html)
 
-    def test_the_title_is_inked_by_the_threads_last_update(self):
-        self.assertIn("row idle a2", opening(render([thread("t", state="idle", updated=6)]), "A"))
+    def test_a_row_fades_by_the_threads_last_update(self):
+        o = opening(render([thread("t", state="idle", updated=6)]), "A")
+        self.assertTrue(o.startswith('<article class="row idle" '), o)
+        self.assertIn(fades(6), o)
 
     def test_an_idle_child_quiet_for_over_ten_minutes_is_one_line(self):
         html = render([thread("r"), thread("old", "r", state="idle", created=50, updated=11,
@@ -440,18 +467,28 @@ class MapTest(unittest.TestCase):
         self.assertEqual(len(set(places)), 5)
         self.assertEqual(sorted(dot_tags_in(html, "docs")), ["A", "B", "C", "D", "E"])
 
-    def test_the_route_runs_from_the_oldest_touch_to_the_dot_and_fades_toward_its_start(self):
+    def test_the_route_runs_from_the_oldest_touch_to_the_newest_segment_at_the_dot(self):
         html = render([thread("t", touched=[("docs/a", 0), ("src/b/x", 7), ("src/a/y", 40)])])
-        route = re.search(r'<g style="--hue:[0-9.]+">(.*?)</g>', html).group(1)
-        segments = re.findall(r'<path class="route (a[0-4])" d="M([0-9.]+) ([0-9.]+)H([0-9.]+)V([0-9.]+)"/>', route)
-        self.assertEqual([s[0] for s in segments], ["a2", "a0"])
+        route = re.search(r'<g style="--hue:[0-9.]+"[^>]*>(.*?)</g>', html).group(1)
+        segments = re.findall(r'<path class="(route[^"]*)" d="M([0-9.]+) ([0-9.]+)H([0-9.]+)V([0-9.]+)"', route)
+        self.assertEqual([s[0] for s in segments], ["route", "route now"])
         # The first segment starts in src/a and the last one ends at the dot, in docs.
         self.assertLess(float(segments[0][1]), 300)
         (_, x, y), = dots(html)
         self.assertAlmostEqual(float(segments[-1][3]) / MAP_W * 100, x, places=1)
         self.assertAlmostEqual(float(segments[-1][4]) / MAP_H * 100, y, places=1)
-        stops = re.findall(r'<circle class="stop (a[0-4])"', route)
-        self.assertEqual(stops, ["a3", "a2"])
+
+    def test_older_segments_and_stops_fade_by_the_time_of_their_touch_the_newest_does_not(self):
+        html = render([thread("t", touched=[("docs/a", 0), ("src/b/x", 7), ("src/a/y", 40)])])
+        route = re.search(r'<g style="--hue:[0-9.]+"[^>]*>(.*?)</g>', html).group(1)
+        self.assertRegex(route, rf'<path class="route" d="[^"]+" {re.escape(fades(7))}/>')
+        self.assertRegex(route, r'<path class="route now" d="[^"]+"/>')
+        self.assertEqual(re.findall(r'<circle class="stop" [^>]*?(data-style:--fade="[^"]*")/>', route),
+                         [fades(40), fades(7)])
+
+    def test_hovering_a_thread_lights_its_whole_route(self):
+        html = render([thread("t", touched=["docs/a", "src/b/x"])])
+        self.assertIn('<g style="--hue:75.0" data-class:hl="$hover == \'A\'">', html)
 
     def test_a_thread_that_touched_one_cell_has_a_dot_and_no_route(self):
         html = render([thread("t", touched=["docs/a", "docs/b"])])

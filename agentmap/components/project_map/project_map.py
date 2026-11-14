@@ -3,7 +3,8 @@ from collections import defaultdict
 from datetime import datetime
 
 from agentmap.components._template import render
-from agentmap.components.view import STATE_CLASS, Forest, age_class, element_id
+from agentmap.components.fade.fade import fade_data
+from agentmap.components.view import STATE_CLASS, Forest, element_id
 from agentmap.treemap import Cell, locate
 
 # The map's own coordinates, in CSS px. The server builds the cells at this
@@ -20,12 +21,14 @@ SLOTS_PER_ROW = 4
 INSET_X, INSET_TOP, INSET_BOTTOM = 14.0, 22.0, 10.0
 
 
-def project_map(cells: list[Cell], forest: Forest, now: datetime) -> str:
+def project_map(cells: list[Cell], forest: Forest) -> str:
     """The map module: the treemap, each thread's route, and each thread's dot.
 
     A thread's route runs through the cells of its touched files, oldest to
-    newest, and ends at its dot. Each segment and stop is inked by the age of
-    the touch it leads to, so the route fades toward its start.
+    newest, and ends at its dot. The newest segment, the one that ends at the
+    dot, has the full color of the thread. Every older segment and every stop
+    fades in real time from the time of its touch, so the route fades toward
+    its start. A hover on the thread draws its whole route at full color.
     """
     # The cells each thread touched, newest first, each cell once with its newest time.
     visits: dict[str, list[tuple[Cell, datetime]]] = {}
@@ -61,12 +64,12 @@ def project_map(cells: list[Cell], forest: Forest, now: datetime) -> str:
         if not stops:
             continue
         hue, tag = forest.hue[t.id], forest.tag[t.id]
-        segments = [{"d": f"M{x1} {y1}H{x2}V{y2}", "age": age_class(now, at)}
+        segments = [{"d": f"M{x1} {y1}H{x2}V{y2}", **fade_data(at)}
                     for ((x1, y1), _), ((x2, y2), at) in zip(stops, stops[1:])]
         if segments:
-            routes.append({"hue": hue, "segments": segments,
-                           "stops": [{"x": x, "y": y, "age": age_class(now, at)}
-                                     for (x, y), at in stops[:-1]]})
+            segments[-1]["now"] = True
+            routes.append({"hue": hue, "tag": tag, "segments": segments,
+                           "stops": [{"x": x, "y": y, **fade_data(at)} for (x, y), at in stops[:-1]]})
         (x, y), _ = stops[-1]
         dots.append({"tag": tag, "hue": hue, "enter": "mouseenter",
                      "state": STATE_CLASS[t.state],

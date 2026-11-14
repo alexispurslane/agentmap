@@ -18,6 +18,12 @@
   --mono: "SF Mono", Menlo, ui-monospace, monospace;
 }
 
+/* Real-time fading. A mark's --fade goes from 0 (just now) to 1 (an hour
+   old) as the page's $now signal ticks every 10 s; see components/fade. A tick
+   moves --fade by about 1% at most, so it needs no transition. A transition
+   would show every mark at full ink for its first 10 s after a page load. */
+@property --fade { syntax: '<number>'; inherits: true; initial-value: 0; }
+
 /* The ink ramp. Every step but the last keeps text at 4.5:1 or more on white;
    the last marks facts older than an hour. */
 .a0 { --age-ink: #141414; --age-line: 1; }
@@ -82,8 +88,13 @@ body {
 .cell.d2 .label { font-weight: 400; font-size: 12px; color: #8a8a8a; }
 .cell.busy { background: #fff; }
 .routes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-.route { fill: none; stroke: oklch(.6 .16 var(--hue)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: var(--age-line); }
-.stop { fill: #fff; stroke: oklch(.6 .16 var(--hue)); stroke-width: 3; stroke-opacity: var(--age-line); }
+/* --fade squared is the age over an hour, so a route segment loses opacity at a
+   steady rate and is gone after an hour. */
+.route { fill: none; stroke: oklch(.6 .16 var(--hue)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); }
+.route.now { stroke: oklch(.56 .17 var(--hue)); stroke-opacity: 1; }
+.stop { fill: #fff; stroke: oklch(.6 .16 var(--hue)); stroke-width: 3; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); fill-opacity: calc(1 - var(--fade) * var(--fade)); }
+.routes g.hl .route, .routes g.hl .stop { stroke-opacity: 1; fill-opacity: 1; }
+.routes g.hl .route { stroke-width: 7; }
 .dot {
   position: absolute; transform: translate(-50%, -50%);
   font: 700 14px/1 var(--sans); padding: 4px 7px; border-radius: 3px;
@@ -110,8 +121,8 @@ body {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 3px;
   padding: 8px 10px 9px; border-bottom: 1px solid var(--rule-soft);
 }
-.row > .tag { align-self: start; margin-top: 2px; }
-.row .title { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--age-ink); }
+.row > .tag { align-self: start; margin-top: 2px; background: oklch(calc(.56 + .08 * var(--fade)) calc(.17 - .07 * var(--fade)) var(--hue)); }
+.row .title { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
 .row .state { font-size: 14px; font-weight: 700; color: var(--ok); white-space: nowrap; }
 .row.idle .state { color: #737373; font-weight: 400; }
 .row.failed .state, .row.needs-you .state { color: #fff; background: var(--red); padding: 0 8px; border-radius: 2px; }
@@ -121,7 +132,7 @@ body {
   border: 1px solid #c4c4c2; border-radius: 2px; line-height: 16px; letter-spacing: .02em;
 }
 .line.tool .lbl { color: var(--ok); border-color: currentColor; }
-.line .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--age-ink); }
+.line .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
 .line.tool .text { font: 15px var(--mono); color: var(--ink); }
 .line.thought .text { font-style: italic; }
 .row .meta { grid-column: 2 / 4; font-size: 13px; color: #737373; }

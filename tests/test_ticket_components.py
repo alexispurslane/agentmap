@@ -225,7 +225,7 @@ class PageTest(unittest.TestCase):
     def test_the_body_declares_three_signals_and_holds_three_fragments(self):
         html = page('<main id="app"></main>', '<section id="epics"></section>', '<div id="tickets"></div>')
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: ''}\"", body)
+        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: '', now: Date.now() / 1000}\"", body)
         self.assertLess(html.index('id="app"'), html.index('id="tickets"'))
         self.assertLess(html.index('id="tickets"'), html.index('id="epics"'))
 

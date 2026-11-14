@@ -1,6 +1,6 @@
 ---
 id: age-yi83
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-14T17:26:22Z

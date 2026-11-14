@@ -1,6 +1,6 @@
 ---
 id: age-qivi
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-14T17:26:22Z

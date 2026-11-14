@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
 from agentmap.components._template import render
-from agentmap.components.view import STATE_CLASS, age_class, element_id, format_age, summary
+from agentmap.components.fade.fade import fade_data
+from agentmap.components.view import STATE_CLASS, element_id, format_age, summary
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
 
@@ -29,12 +30,11 @@ def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
         "state": STATE_CLASS[thread.state],
         "state_label": {"working": "working", "needs_you": "needs you",
                         "idle": f"idle {age}", "failed": f"failed {age}"}[thread.state],
-        "age": age_class(now, thread.updated_at),
+        **fade_data(thread.updated_at),
         "compact": (not is_root and thread.state == "idle"
                     and now - thread.updated_at > COMPACT_AFTER),
         "tool": thread.now,
-        "summary": line and {"kind": line.kind, "text": line.text,
-                             "age": age_class(now, line.at)},
+        "summary": line and {"kind": line.kind, "text": line.text, **fade_data(line.at)},
         "meta": f"{meta} · started {format_age(now - thread.created_at)} ago",
         "kids": kids_html,
     })
