@@ -6,7 +6,7 @@ dependencies = []
 
 [tool.mutmut]
 paths_to_mutate = ["agentmap/"]
-# libcst 1.9.0 cannot parse t-strings, so mutmut cannot mutate render.py.
-do_not_mutate = ["agentmap/render.py"]
+# The vendored Mustache engine is third-party code with its own tests.
+do_not_mutate = ["agentmap/vendor/*"]
 tests_dir = ["tests/"]
 pytest_add_cli_args_test_selection = ["tests/"]

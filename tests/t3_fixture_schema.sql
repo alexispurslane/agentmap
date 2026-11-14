@@ -50,3 +50,13 @@ CREATE INDEX orchestration_v2_projection_turn_items_node_ordinal_idx
 CREATE INDEX orchestration_v2_projection_turn_items_active_ordinal_idx
   ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id)
   WHERE status IN ('pending', 'running', 'waiting');
+
+CREATE TABLE orchestration_v2_projection_subagents (
+  subagent_id TEXT PRIMARY KEY,
+  child_thread_id TEXT,
+  status TEXT NOT NULL,
+  started_at TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX orchestration_v2_projection_subagents_child_thread_idx
+  ON orchestration_v2_projection_subagents(child_thread_id);

@@ -41,6 +41,9 @@ class FakeReader:
     def thread_project(self, thread_id):
         return {"other": False}.get(thread_id, True)
 
+    def events(self, now):
+        return []
+
 
 class Clock:
     def __init__(self):

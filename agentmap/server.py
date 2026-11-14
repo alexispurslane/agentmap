@@ -7,7 +7,7 @@ One process serves three things on one port:
 - `POST /mcp`, the MCP endpoint through which agents post their plans.
 
 The poller thread is the only caller of the T3 reader's `snapshot` and of
-`render_app`. It publishes each new app HTML to a `Hub`, and every open stream
+the `app` component. It publishes each new app HTML to a `Hub`, and every open stream
 waits on that hub.
 """
 
@@ -22,7 +22,8 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from agentmap import mcp
-from agentmap.render import MAP_H, MAP_W, render_app, render_page
+from agentmap.components import app, page
+from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.treemap import Cell, build_cells, code_weights
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -100,7 +101,9 @@ class Dashboard:
         due = self._last_render is None or now - self._last_render >= self.refresh
         if not (db_changed or due or plans != self._last_plans or cells != self._last_cells):
             return False
-        html = render_app(self.reader.snapshot(now), plans, cells, now, self.project_name)
+        # The event log merges T3 Code's history with the plan log's history.
+        events = self.reader.events(now) + self.store.events()
+        html = app(self.reader.snapshot(now), plans, cells, events, now, self.project_name)
         self._last_render, self._last_plans, self._last_cells = now, plans, cells
         return self.hub.publish(html)
 
@@ -149,7 +152,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == "/":
-            self._send(200, render_page(self.dashboard.hub.html or EMPTY_APP).encode(),
+            self._send(200, page(self.dashboard.hub.html or EMPTY_APP).encode(),
                        {"Content-Type": "text/html; charset=utf-8"})
         elif path == "/stream":
             self._stream()

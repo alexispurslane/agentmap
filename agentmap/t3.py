@@ -79,6 +79,9 @@ class AgentThread:
     `thought_at` and `said_at` are the start times of the items that `thought`
     and `last_said` came from, or None when those are None. In a snapshot,
     every `parent_id` names a thread of the same snapshot, or is None.
+    `delegation` is the status of the newest task that a parent gave to the
+    thread (running, completed, failed, cancelled, interrupted), or None for a
+    thread that got no task.
     """
 
     id: str
@@ -95,6 +98,7 @@ class AgentThread:
     thought_at: datetime | None
     said_at: datetime | None
     touched: tuple[Touch, ...]
+    delegation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -275,7 +279,20 @@ class T3Reader:
             state=state, created_at=_parse(created_at), updated_at=_parse(updated_at),
             now=details.now, thought=_text_of(details.thought),
             last_said=_text_of(details.said), thought_at=_time_of(details.thought),
-            said_at=_time_of(details.said), touched=details.touched)
+            said_at=_time_of(details.said), touched=details.touched,
+            delegation=self._delegation(thread_id))
+
+    def _delegation(self, thread_id: str) -> str | None:
+        """The status of the newest delegation record whose child is this thread.
+
+        The query is not cached: a parent can give the thread a new task without
+        a change to the thread's own row.
+        """
+        row = self._conn.execute(
+            "SELECT status FROM orchestration_v2_projection_subagents"
+            " WHERE child_thread_id = ?"
+            " ORDER BY coalesce(started_at, updated_at) DESC LIMIT 1", (thread_id,)).fetchone()
+        return row[0] if row else None
 
     def _liveness(self, thread_id: str, payload: dict) -> tuple[str | None, str]:
         """The newest run's id (None for a native subagent) and one of working, failed, idle."""

@@ -1,0 +1,40 @@
+from datetime import datetime, timedelta
+
+from agentmap.components._template import render
+from agentmap.components.view import STATE_CLASS, age_class, element_id, format_age, summary
+from agentmap.plan import Plan
+from agentmap.t3 import AgentThread
+
+# An idle child thread that is quiet for longer than this shows as one line.
+COMPACT_AFTER = timedelta(minutes=10)
+
+
+def agent_row(thread: AgentThread, tag: str, hue: float, plan: Plan | None,
+              kids_html: str, is_root: bool, now: datetime) -> str:
+    """One thread's row in the agent tree, with its children's rows inside it.
+
+    A full row shows the current tool call (while the thread works) and one
+    summary line: the newest of the agent's posted status, its last message
+    and its newest thought. An idle child quiet for over 10 minutes is one line.
+    """
+    age = format_age(now - thread.updated_at)
+    line = summary(thread, plan)
+    meta = " · ".join(x for x in (thread.provider, thread.model) if x)
+    return render("agent_row", {
+        "id": element_id("t", thread.id),
+        "tag": tag,
+        "hue": hue,
+        "enter": "mouseover__stop",
+        "title": thread.title,
+        "state": STATE_CLASS[thread.state],
+        "state_label": {"working": "working", "needs_you": "needs you",
+                        "idle": f"idle {age}", "failed": f"failed {age}"}[thread.state],
+        "age": age_class(now, thread.updated_at),
+        "compact": (not is_root and thread.state == "idle"
+                    and now - thread.updated_at > COMPACT_AFTER),
+        "tool": thread.now,
+        "summary": line and {"kind": line.kind, "text": line.text,
+                             "age": age_class(now, line.at)},
+        "meta": f"{meta} · started {format_age(now - thread.created_at)} ago",
+        "kids": kids_html,
+    })

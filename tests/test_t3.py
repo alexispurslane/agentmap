@@ -93,6 +93,14 @@ class Fixture:
              json.dumps(payload)))
         return item_id
 
+    def delegation(self, child, status, started=None, updated=1.0):
+        """A delegation record: a task given to the thread `child`, started `started` minutes ago."""
+        self._ordinal += 1
+        self.db.execute(
+            "INSERT INTO orchestration_v2_projection_subagents VALUES (?, ?, ?, ?, ?)",
+            (f"sub-{self._ordinal}", child, status,
+             stamp(started) if started is not None else None, stamp(updated)))
+
     def set_item_status(self, item_id, status):
         self.db.execute(
             "UPDATE orchestration_v2_projection_turn_items SET status = ? WHERE turn_item_id = ?",
@@ -288,6 +296,44 @@ class ThreadState(unittest.TestCase):
         self.f.item("t", "approval_request", "waiting", old)
         self.f.run("t", 2, "running")
         self.assertEqual(self.state(), "working")
+
+
+class Delegation(unittest.TestCase):
+    """`delegation` is the status of the newest task that a parent gave to the thread."""
+
+    def setUp(self):
+        self.f = Fixture(self)
+        self.f.thread("t", updated=1)
+        self.f.thread("other", updated=1)
+
+    def delegation(self):
+        return by_id(self.f.reader(self).snapshot(NOW))["t"].delegation
+
+    def test_a_thread_that_got_no_task_has_no_delegation(self):
+        self.f.delegation("other", "running", started=5)
+        self.assertIsNone(self.delegation())
+
+    def test_the_delegation_is_the_status_of_the_newest_task(self):
+        self.f.delegation("t", "running", started=2)
+        self.f.delegation("t", "completed", started=30)
+        self.assertEqual(self.delegation(), "running")
+
+    def test_a_resumed_and_finished_thread_shows_its_newest_end(self):
+        self.f.delegation("t", "failed", started=30)
+        self.f.delegation("t", "completed", started=2)
+        self.assertEqual(self.delegation(), "completed")
+
+    def test_a_task_without_a_start_time_counts_from_its_last_update(self):
+        self.f.delegation("t", "completed", started=30)
+        self.f.delegation("t", "running", started=None, updated=1)
+        self.assertEqual(self.delegation(), "running")
+
+    def test_the_delegation_follows_a_new_task_without_a_new_reader(self):
+        reader = self.f.reader(self)
+        self.f.delegation("t", "completed", started=30)
+        self.assertEqual(by_id(reader.snapshot(NOW))["t"].delegation, "completed")
+        self.f.delegation("t", "running", started=1)
+        self.assertEqual(by_id(reader.snapshot(NOW))["t"].delegation, "running")
 
 
 class NativeSubagentState(unittest.TestCase):
