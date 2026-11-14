@@ -169,11 +169,16 @@ def _map(forest: _Forest, cells: list[Cell]) -> str:
                  f"width:{100 * c.w / MAP_W:.3f}%;height:{100 * c.h / MAP_H:.3f}%")
         out.append(
             f'<div class="{cls}" id="{_id("c", c.key)}" data-cell="{escape(c.key)}" style="{style}">'
-            f'<span class="label">{escape(c.label)}</span>'
+            f'<span class="label">{escape(_label(c))}</span>'
             f'<div class="pins">{"".join(pins[c.key])}{"".join(trails[c.key])}</div>'
             "</div><!--/cell-->")
     out.append("</div></section>")
     return "".join(out)
+
+
+def _label(cell: Cell) -> str:
+    """The label of a cell. The cell of files directly in a directory says `files`."""
+    return "files" if cell.label == "." else cell.label
 
 
 def _tree(forest: _Forest, plans: dict[str, Plan], now: datetime) -> str:

@@ -107,6 +107,11 @@ class MapTest(unittest.TestCase):
         self.assertRegex(html, r'data-cell="src"[^>]*style="left:25(\.0+)?%;top:0(\.0+)?%;'
                                r'width:50(\.0+)?%;height:100(\.0+)?%')
 
+    def test_a_cell_of_files_directly_in_a_directory_is_labeled_files(self):
+        html = app([], cells=[Cell(".", ".", 1, 0, 0, 100, 100, 1),
+                              Cell("src/.", ".", 2, 100, 0, 100, 100, 1)])
+        self.assertEqual(re.findall(r'<span class="label">([^<]*)</span>', html), ["files", "files"])
+
     def test_a_thread_has_a_dot_in_the_cell_of_its_newest_touched_path(self):
         html = app([thread("t", touched=["src/b/x.py", "docs/y.md"])])
         self.assertEqual(dots_in_cell(html, "src/b"), ["A"])

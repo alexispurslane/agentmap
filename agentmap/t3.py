@@ -361,8 +361,17 @@ def _tool_line(name: str, args: object, roots: list[str]) -> str:
     return "Using " + _short_tool_name(name)
 
 
+# Whole `<tag>...</tag>` blocks at the start of a text. The harness puts one
+# there, for example `<tools-used-before-summary>Edit</tools-used-before-summary>`.
+_LEADING_TAG_BLOCKS = re.compile(r"\A(?:\s*<([A-Za-z][\w-]*)>.*?</\1>)+", re.S)
+
+
 def _first_sentence(text: str) -> str | None:
-    """The first sentence of the first non-empty line, at most MAX_SENTENCE characters."""
+    """The first sentence of the first non-empty line, at most MAX_SENTENCE characters.
+
+    Tag blocks at the start of the text are skipped.
+    """
+    text = _LEADING_TAG_BLOCKS.sub("", text, count=1)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     if not line:
         return None

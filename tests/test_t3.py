@@ -501,6 +501,25 @@ class ThoughtAndLastSaid(unittest.TestCase):
         self.f.item("t", "assistant_message", text="**Plan**\nMore text.")
         self.assertEqual(self.thread().last_said, "**Plan**")
 
+    def test_a_leading_harness_tag_block_is_skipped(self):
+        self.f.item("t", "assistant_message",
+                    text="<tools-used-before-summary>Edit, Skill</tools-used-before-summary>\n\n"
+                         "(•̀ᴗ•́)و The reader is built. All tests pass.")
+        self.assertEqual(self.thread().last_said, "(•̀ᴗ•́)و The reader is built.")
+
+    def test_several_leading_tag_blocks_over_several_lines_are_skipped(self):
+        self.f.item("t", "assistant_message",
+                    text="<a-b>x\ny</a-b> <c>z</c>\n**Report: the Tao** of it.")
+        self.assertEqual(self.thread().last_said, "**Report: the Tao** of it.")
+
+    def test_a_tag_inside_the_sentence_stays(self):
+        self.f.item("t", "assistant_message", text="Use <b>bold</b> here. Then stop.")
+        self.assertEqual(self.thread().last_said, "Use <b>bold</b> here.")
+
+    def test_a_text_of_only_a_tag_block_gives_none(self):
+        self.f.item("t", "assistant_message", text="<tools-used-before-summary>Read</tools-used-before-summary>")
+        self.assertIsNone(self.thread().last_said)
+
     def test_a_long_sentence_is_cut_to_160_characters(self):
         self.f.item("t", "reasoning", text="word " * 100)
         thought = self.thread().thought
