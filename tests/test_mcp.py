@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 from agentmap import mcp
+from agentmap.caller import CallerError
 from agentmap.plan import PlanStore
 
 THREAD = "deb79e0c-thread"
@@ -340,6 +341,55 @@ class Tools(EndpointTestCase):
     def test_a_tool_call_without_a_name_gets_error_32602(self):
         answer = self.rpc("tools/call", {"arguments": {}})
         self.assertEqual(answer["error"]["code"], -32602)
+
+
+class CallerWithoutHeader(EndpointTestCase):
+    """Codex threads share one process, so they call without a thread header."""
+
+    def setUp(self):
+        super().setUp()
+        self.finds = []
+        self.answer = "codex-thread"
+
+    def find_caller(self, tool, arguments):
+        self.finds.append((tool, arguments))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+    def post(self, message, headers=None):
+        body = json.dumps(message).encode()
+        return mcp.handle(body, {} if headers is None else headers, self.store,
+                          self.thread_project, self.find_caller)
+
+    def test_without_a_header_the_finder_names_the_thread(self):
+        is_error, _ = self.call("set_goal", {"goal": "G"})
+        self.assertFalse(is_error)
+        self.assertEqual(self.store.plan("codex-thread").goal, "G")
+        self.assertEqual(self.finds, [("set_goal", {"goal": "G"})])
+        self.assertEqual(self.asked, ["codex-thread"])
+
+    def test_missing_arguments_are_looked_up_as_empty_arguments(self):
+        self.call("get_plan")
+        self.assertEqual(self.finds, [("get_plan", {})])
+
+    def test_a_finder_error_is_a_tool_error_with_its_message(self):
+        self.answer = CallerError("Two threads made the same call. Call again.")
+        is_error, text = self.call("set_goal", {"goal": "G"})
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Two threads made the same call. Call again.")
+        self.assertEqual(self.store.plans(), {})
+
+    def test_a_header_wins_over_the_finder(self):
+        self.call("set_goal", {"goal": "G"}, headers={"X-T3-Thread": THREAD})
+        self.assertEqual(self.finds, [])
+        self.assertEqual(self.store.plan(THREAD).goal, "G")
+
+    def test_the_found_thread_is_checked_for_its_project(self):
+        self.project_answer = False
+        is_error, text = self.call("set_goal", {"goal": "G"})
+        self.assertTrue(is_error)
+        self.assertIn("another", text)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,12 @@ class _Details:
     touched_ordinal: int  # The newest ordinal that the touched scan has seen.
 
 
+# The MCP server name that the harness configurations give agentmap.
+SERVER_NAME = "agentmap"
+# A tool call that started longer ago than this is stale.
+CALL_MAX_AGE = timedelta(minutes=5)
+
+
 class T3Reader:
     """A read-only view of one project's threads in T3 Code's database.
 
@@ -119,6 +125,32 @@ class T3Reader:
             if row is None:
                 return None
             return row[0] in self._project_ids()
+
+    def find_tool_calls(self, tool: str, arguments: dict, now: datetime) -> list[tuple[str, str]]:
+        """The active calls of the agentmap tool `tool` with exactly these arguments.
+
+        Returns (turn item id, thread id) pairs, oldest first. Claude Code names
+        the tool `mcp__agentmap__<tool>` and Codex names it `agentmap.<tool>`.
+        A call that started more than CALL_MAX_AGE before `now` is stale and
+        left out.
+        """
+        names = {f"mcp__{SERVER_NAME}__{tool}", f"{SERVER_NAME}.{tool}"}
+        oldest = now - CALL_MAX_AGE
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT turn_item_id, thread_id, payload_json"
+                " FROM orchestration_v2_projection_turn_items"
+                " WHERE type = 'dynamic_tool' AND status IN ('pending', 'running', 'waiting')"
+            ).fetchall()
+        found = []
+        for item_id, thread_id, payload_json in rows:
+            payload = json.loads(payload_json)
+            started = payload.get("startedAt")
+            if (payload.get("toolName") in names and started
+                    and (payload.get("input") or {}) == arguments
+                    and _parse(started) >= oldest):
+                found.append((_parse(started), item_id, thread_id))
+        return [(item_id, thread_id) for _, item_id, thread_id in sorted(found)]
 
     def snapshot(self, now: datetime) -> list[AgentThread]:
         """The project's threads updated inside the window, with all their ancestors."""

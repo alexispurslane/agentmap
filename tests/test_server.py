@@ -278,6 +278,17 @@ class HttpTest(unittest.TestCase):
             stop.set()
             poller.join(2)
 
+    def test_an_mcp_call_without_a_header_goes_to_the_thread_that_the_finder_names(self):
+        self.dash.find_caller = lambda tool, arguments: "codex-thread"
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("POST", "/mcp", json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": "set_goal", "arguments": {"goal": "From Codex"}}}).encode(),
+            {"Content-Type": "application/json"})
+        self.assertEqual(conn.getresponse().status, 200)
+        conn.close()
+        self.assertEqual(self.store.plan("codex-thread").goal, "From Codex")
+
     def test_mcp_initialize_answers_with_json(self):
         resp, data = self.mcp({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                                "params": {"protocolVersion": "2025-06-18", "capabilities": {},

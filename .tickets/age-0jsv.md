@@ -1,6 +1,6 @@
 ---
 id: age-0jsv
-status: open
+status: closed
 deps: [age-be3w]
 links: []
 created: 2026-11-14T14:48:17Z

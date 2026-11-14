@@ -724,5 +724,73 @@ class ReadOnly(unittest.TestCase):
         self.assertFalse(missing.exists())
 
 
+class FindToolCalls(unittest.TestCase):
+    """The database side of finding the thread that made an MCP call."""
+
+    def setUp(self):
+        self.f = Fixture(self)
+        self.f.thread("claude-t")
+        self.f.thread("codex-t", provider="codex")
+
+    def call(self, thread, tool_name, input, status="running", started=0.1):
+        return self.f.item(thread, "dynamic_tool", status=status, toolName=tool_name,
+                           input=input, startedAt=stamp(started))
+
+    def find(self, tool, arguments):
+        return self.f.reader(self).find_tool_calls(tool, arguments, NOW)
+
+    def test_a_running_claude_call_of_the_agentmap_tool_is_found(self):
+        item = self.call("claude-t", "mcp__agentmap__set_goal", {"goal": "G"})
+        self.assertEqual(self.find("set_goal", {"goal": "G"}), [(item, "claude-t")])
+
+    def test_a_running_codex_call_of_the_agentmap_tool_is_found(self):
+        item = self.call("codex-t", "agentmap.set_goal", {"goal": "G"})
+        self.assertEqual(self.find("set_goal", {"goal": "G"}), [(item, "codex-t")])
+
+    def test_calls_of_other_servers_other_tools_or_other_arguments_are_not_found(self):
+        self.call("claude-t", "mcp__other__set_goal", {"goal": "G"})
+        self.call("codex-t", "other.set_goal", {"goal": "G"})
+        self.call("claude-t", "mcp__agentmap__set_status", {"goal": "G"})
+        self.call("codex-t", "agentmap.set_goal", {"goal": "H"})
+        self.assertEqual(self.find("set_goal", {"goal": "G"}), [])
+
+    def test_argument_order_does_not_matter(self):
+        item = self.call("codex-t", "agentmap.mark_todo", {"state": "done", "id": "1"})
+        self.assertEqual(self.find("mark_todo", {"id": "1", "state": "done"}), [(item, "codex-t")])
+
+    def test_a_call_without_input_matches_empty_arguments(self):
+        item = self.call("codex-t", "agentmap.get_plan", None)
+        self.assertEqual(self.find("get_plan", {}), [(item, "codex-t")])
+
+    def test_finished_calls_are_not_found(self):
+        for status in ("completed", "failed", "interrupted", "cancelled"):
+            self.call("codex-t", "agentmap.get_plan", {}, status=status)
+        self.assertEqual(self.find("get_plan", {}), [])
+
+    def test_pending_and_waiting_calls_are_found(self):
+        a = self.call("codex-t", "agentmap.get_plan", {}, status="pending", started=0.3)
+        b = self.call("claude-t", "mcp__agentmap__get_plan", {}, status="waiting", started=0.2)
+        self.assertEqual(self.find("get_plan", {}), [(a, "codex-t"), (b, "claude-t")])
+
+    def test_a_call_started_exactly_five_minutes_ago_still_counts(self):
+        item = self.call("codex-t", "agentmap.get_plan", {}, started=5.0)
+        self.assertEqual(self.find("get_plan", {}), [(item, "codex-t")])
+
+    def test_calls_started_over_five_minutes_ago_are_stale(self):
+        self.call("codex-t", "agentmap.get_plan", {}, started=5.1)
+        fresh = self.call("codex-t", "agentmap.get_plan", {}, started=4.9)
+        self.assertEqual(self.find("get_plan", {}), [(fresh, "codex-t")])
+
+    def test_calls_are_listed_oldest_first(self):
+        new = self.call("codex-t", "agentmap.get_plan", {}, started=0.1)
+        old = self.call("claude-t", "mcp__agentmap__get_plan", {}, started=0.5)
+        self.assertEqual(self.find("get_plan", {}), [(old, "claude-t"), (new, "codex-t")])
+
+    def test_a_call_without_a_start_time_is_skipped(self):
+        self.f.item("codex-t", "dynamic_tool", status="running", toolName="agentmap.get_plan",
+                    input={})
+        self.assertEqual(self.find("get_plan", {}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ The user chose these points on 2026-11-14:
 | Where space shows | One shared map over the top part of the screen, with one dot per thread. |
 | Map shape | A treemap: each directory gets an area in proportion to its code size. |
 | Where the plan log is stored | In the watched project's repository, in `.agentmap/plan.jsonl`. |
+| How a Codex caller is identified | By the `X-T3-Thread` header if it is there, else by T3 Code's record of the call (see `caller.py`). |
 
 Other fixed points:
 
@@ -130,7 +131,8 @@ Behavior:
 - A message without `id` is a notification. The answer is status 202 with an empty body.
 - An unknown method gets error `-32601`. Bad JSON gets error `-32700`.
 - The thread id comes from the header `X-T3-Thread`. Three header values are bad: no header, an empty header, and the literal text `${T3CODE_THREAD_ID}`.
-- For a bad header, a tool call returns `isError: true`. The message tells how to set the header.
+- For a bad header, `handle` calls `find_caller(tool, arguments)`, its optional fifth argument. That function names the thread or raises `CallerError`. A `CallerError` becomes a tool result with `isError: true` and the error's message.
+- For a bad header without `find_caller`, a tool call returns `isError: true`. The message tells how to set the header.
 - When `thread_project` returns `False`, the tool call returns `isError: true`.
 - The server checks the `Origin` header before it calls `handle`. That rule is in `server.py`.
 
@@ -158,6 +160,29 @@ Status: Waiting on the timed take.
 3 [ ] Merge and close ticket
 ```
 
+### caller.py: the thread of a call without a header
+
+All Codex threads in T3 Code share one `codex app-server` process. That process has no `T3CODE_THREAD_ID`, so Codex cannot send the header. T3 Code records each MCP call as a `dynamic_tool` turn item, with the thread, the tool name and the arguments. The item is active while the call runs.
+
+```python
+class CallerError(Exception): ...
+class CallerFinder:
+    def __init__(self, lookup, *, timeout=2.0, interval=0.05, clock=time.monotonic, sleep=time.sleep): ...
+    def __call__(self, tool: str, arguments: dict) -> str: ...   # the thread id
+```
+
+where
+
+- `lookup(tool, arguments)` = `T3Reader.find_tool_calls` with the current time. It returns the active, matching records as (turn item id, thread id) pairs, oldest first.
+- `timeout` = how long, in seconds, the finder waits for T3 Code to write the record.
+- `interval` = the time, in seconds, between two lookups.
+
+Rules:
+
+- One record serves one request. The finder claims each record that it uses, and it keeps a claim for 600 seconds. The lookup drops records that started more than 5 minutes ago. Thus a record cannot match again after its claim ends.
+- When records of two different threads match, the finder raises `CallerError`. The message asks the agent to call again.
+- When no record matches before the timeout, the finder raises `CallerError`. The message tells Claude Code users to set the header.
+
 ### t3.py: the T3 Code reader
 
 `t3.py` reads T3 Code's database read-only and builds one snapshot of the watched project's threads.
@@ -168,7 +193,14 @@ class T3Reader:
     def changed(self) -> bool: ...                 # True if PRAGMA data_version moved since the last call
     def snapshot(self, now: datetime) -> list[AgentThread]: ...
     def thread_project(self, thread_id: str) -> bool | None: ...
+    def find_tool_calls(self, tool: str, arguments: dict, now: datetime) -> list[tuple[str, str]]: ...
 ```
+
+`find_tool_calls` reads `dynamic_tool` items with the status `pending`, `running` or `waiting`. It keeps an item when all of these are true:
+
+- The tool name is `mcp__agentmap__<tool>` (Claude Code) or `agentmap.<tool>` (Codex).
+- The item's `input` equals `arguments`. A missing input counts as `{}`.
+- The item's `startedAt` is at most 5 minutes before `now`.
 
 `AgentThread` is a frozen dataclass:
 
@@ -248,6 +280,7 @@ def render_app(threads: list[AgentThread], plans: dict[str, Plan], cells: list[C
 - Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`. The tag shows on the dot and on the card, so that the reader can match them.
 - A dot sits in the cell of the thread's newest touched path. Dots in one cell sit on a small grid inside the cell, in tag order. A thread without a touched path has no dot.
 - A card shows the tag, title, provider and model, state, age, now line, thought, last said, status line and plan.
+- A cell with the key `.` or `<dir>/.` has the label `files`.
 - A plan shows its goal, then its items. A done top-level item shows as one line with a count, for example `✓ Diagnose budget overrun (3/3)`.
 - An idle child thread whose `updated_at` is more than 10 minutes old shows as one line.
 - All text goes through `html.escape`.
@@ -293,12 +326,11 @@ Claude Code, in the watched project's `.mcp.json`:
 }
 ```
 
-Codex, in `~/.codex/config.toml`:
+Codex, in `~/.codex/config.toml`. Codex needs no header, because `caller.py` finds the calling thread:
 
 ```toml
 [mcp_servers.agentmap]
 url = "http://127.0.0.1:7788/mcp"
-env_http_headers = { "X-T3-Thread" = "T3CODE_THREAD_ID" }
 ```
 
 ## Order of the work

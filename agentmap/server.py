@@ -72,7 +72,8 @@ class Dashboard:
 
     def __init__(self, reader, store, cells: Callable[[], list[Cell]], project_name: str, *,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                 refresh: float = 15.0, ping_every: float = 15.0):
+                 refresh: float = 15.0, ping_every: float = 15.0,
+                 find_caller: Callable[[str, dict], str] | None = None):
         self.reader = reader
         self.store = store
         self.cells = cells
@@ -80,6 +81,7 @@ class Dashboard:
         self.clock = clock
         self.refresh = timedelta(seconds=refresh)
         self.ping_every = ping_every
+        self.find_caller = find_caller
         self.hub = Hub()
         self.wake = threading.Event()
         self._last_render: datetime | None = None
@@ -178,7 +180,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length)
         status, headers, out = mcp.handle(body, self.headers, self.dashboard.store,
-                                          self.dashboard.reader.thread_project)
+                                          self.dashboard.reader.thread_project,
+                                          self.dashboard.find_caller)
         self._send(status, out, headers)
         self.dashboard.wake.set()
 

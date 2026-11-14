@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agentmap.caller import CallerFinder
 from agentmap.plan import PlanStore
 from agentmap.server import CellCache, Dashboard, make_server
 from agentmap.t3 import T3Reader
@@ -39,7 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     reader = T3Reader(args.t3_db, root, timedelta(hours=args.hours))
     store = PlanStore(root / ".agentmap" / "plan.jsonl")
     cells = CellCache(root)
-    dashboard = Dashboard(reader, store, cells, root.name)
+    # Codex threads share one process and send no thread header. The finder
+    # names their thread from T3 Code's record of the call.
+    find_caller = CallerFinder(
+        lambda tool, arguments: reader.find_tool_calls(tool, arguments, datetime.now(timezone.utc)))
+    dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller)
     server = make_server(dashboard, "127.0.0.1", args.port)
     stop = threading.Event()
     for target in (cells.run, dashboard.run):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Callable, Mapping
 
+from agentmap.caller import CallerError
 from agentmap.plan import GOAL_MAX, ITEM_MAX, STATUS_MAX, Plan, PlanError, PlanStore
 
 SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -40,11 +41,9 @@ Each tool answers with your plan outline and its item ids."""
 
 _NO_THREAD = f"""\
 agentmap does not know which thread calls it: the {THREAD_HEADER} header is \
-missing, empty or not expanded. Set it to the T3 Code thread id.
-- Claude Code: in .mcp.json, give the agentmap server \
-"headers": {{"{THREAD_HEADER}": "{UNEXPANDED_THREAD}"}}.
-- Codex: in ~/.codex/config.toml, give [mcp_servers.agentmap] \
-env_http_headers = {{ "{THREAD_HEADER}" = "T3CODE_THREAD_ID" }}.
+missing, empty or not expanded. Set it to the T3 Code thread id. For Claude \
+Code, in .mcp.json, give the agentmap server \
+"headers": {{"{THREAD_HEADER}": "{UNEXPANDED_THREAD}"}}. \
 T3 Code sets T3CODE_THREAD_ID only in the agents that it starts."""
 
 _OTHER_PROJECT = """\
@@ -135,8 +134,14 @@ class _RpcError(Exception):
 
 
 def handle(body: bytes, headers: Mapping[str, str], store: PlanStore,
-           thread_project: Callable[[str], bool | None]) -> tuple[int, dict[str, str], bytes]:
-    """Answer one POST to /mcp with (HTTP status, response headers, response body)."""
+           thread_project: Callable[[str], bool | None],
+           find_caller: Callable[[str, dict], str] | None = None,
+           ) -> tuple[int, dict[str, str], bytes]:
+    """Answer one POST to /mcp with (HTTP status, response headers, response body).
+
+    The calling thread comes from the X-T3-Thread header. Without the header,
+    `find_caller(tool, arguments)` names it, or raises CallerError.
+    """
     try:
         message = json.loads(body.decode("utf-8"))
     except ValueError:
@@ -161,7 +166,7 @@ def handle(body: bytes, headers: Mapping[str, str], store: PlanStore,
             params = {}
         if not isinstance(params, dict):
             raise _RpcError(INVALID_PARAMS, "The params must be a JSON object.")
-        result = _dispatch(method, params, headers, store, thread_project)
+        result = _dispatch(method, params, headers, store, thread_project, find_caller)
     except _RpcError as error:
         return _answer(200, {"jsonrpc": "2.0", "id": message["id"],
                              "error": {"code": error.code, "message": str(error)}})
@@ -194,7 +199,8 @@ def _bad_request(code: int, message: str) -> tuple[int, dict[str, str], bytes]:
 
 
 def _dispatch(method: str, params: dict, headers: Mapping[str, str], store: PlanStore,
-              thread_project: Callable[[str], bool | None]) -> dict:
+              thread_project: Callable[[str], bool | None],
+              find_caller: Callable[[str, dict], str] | None) -> dict:
     if method == "initialize":
         version = params.get("protocolVersion")
         return {
@@ -208,24 +214,30 @@ def _dispatch(method: str, params: dict, headers: Mapping[str, str], store: Plan
     if method == "tools/list":
         return {"tools": TOOLS}
     if method == "tools/call":
-        return _call_tool(params, headers, store, thread_project)
+        return _call_tool(params, headers, store, thread_project, find_caller)
     raise _RpcError(METHOD_NOT_FOUND, f"Method not found: {method}")
 
 
 def _call_tool(params: dict, headers: Mapping[str, str], store: PlanStore,
-               thread_project: Callable[[str], bool | None]) -> dict:
+               thread_project: Callable[[str], bool | None],
+               find_caller: Callable[[str, dict], str] | None) -> dict:
     name = params.get("name")
     if not isinstance(name, str) or name not in _TOOL_RUNNERS:
         raise _RpcError(INVALID_PARAMS, f"Unknown tool: {name!r}")
+    arguments = params.get("arguments")
+    if arguments is None:
+        arguments = {}
     thread = _thread(headers)
+    if thread is None and find_caller is not None:
+        try:
+            thread = find_caller(name, arguments)
+        except CallerError as error:
+            return _tool_result(str(error), is_error=True)
     if thread is None:
         return _tool_result(_NO_THREAD, is_error=True)
     if thread_project(thread) is False:
         return _tool_result(_OTHER_PROJECT, is_error=True)
-    arguments = params.get("arguments")
     try:
-        if arguments is None:
-            arguments = {}
         if not isinstance(arguments, dict):
             raise PlanError("The arguments must be a JSON object.")
         _TOOL_RUNNERS[name](store, thread, arguments)
