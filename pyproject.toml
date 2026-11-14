@@ -1,0 +1,10 @@
+[project]
+name = "agentmap"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.mutmut]
+paths_to_mutate = ["agentmap/"]
+tests_dir = ["tests/"]
+pytest_add_cli_args_test_selection = ["tests/"]
