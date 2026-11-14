@@ -165,6 +165,47 @@ class LayoutGeometryTest(unittest.TestCase):
         cells = build_cells({f"{k}/x": 1 for k in "abcdefgh"}, 2.0, 1.0)
         self.assertAlmostEqual(by_key(cells)["h"].y, 0.5)
 
+    def test_the_last_strip_joins_a_strip_of_several_items(self):
+        # Greedy gives [a b] [c]; the joined strip [a b c] has the lower mean.
+        cells = build_cells({"a/x": 1, "b/x": 3, "c/x": 3}, 2.0, 1.0)
+        self.assertEqual({round(c.y, 9) for c in cells if c.depth == 1}, {0.0})
+
+    def test_a_last_strip_of_several_items_joins_the_strip_before_it(self):
+        # Greedy gives [a] [b c]; the joined strip [a b c] has the lower mean.
+        cells = build_cells({"a/x": 8, "b/x": 1, "c/x": 1}, 2.0, 1.0)
+        self.assertEqual({round(c.y, 9) for c in cells if c.depth == 1}, {0.0})
+
+    def test_only_the_last_two_strips_are_considered_for_joining(self):
+        # On a tall map, each of three items is a strip of its own.
+        cells = build_cells({"a/x": 2, "b/x": 1, "c/x": 2}, 1.0, 2.0)
+        top = [c for c in cells if c.depth == 1]
+        self.assertEqual([c.key for c in top], ["a", "b", "c"])
+        for c in top:
+            self.assertAlmostEqual(c.w, 1.0)
+        self.assertAlmostEqual(sum(map(area, top)), 2.0)
+
+    def test_a_tie_keeps_the_greedy_strips(self):
+        # Two equal items on a 2 x 2 map: one 2 x 1 strip each, or two 1 x 2
+        # cells side by side, both mean aspect 2. The item stays in the strip.
+        cells = by_key(build_cells({"a/x": 1, "b/x": 1}, 2.0, 2.0))
+        self.assertAlmostEqual(cells["b"].y, 0.0)
+        self.assertAlmostEqual(cells["b"].x, 1.0)
+        # Weights 2 and 1 on a 1 x 1 map: greedy splits them, and joining
+        # them back ties (mean aspect 1.5 either way). The strips stay apart.
+        cells = by_key(build_cells({"a/x": 2, "b/x": 1}, 1.0, 1.0))
+        self.assertAlmostEqual(cells["b"].x, 0.0)
+        self.assertAlmostEqual(cells["b"].w, 1.0)
+
+    def test_a_project_of_one_line_gives_one_cell(self):
+        self.assertEqual(build_cells({"a.py": 1}, W, H), [Cell(".", ".", 1, 0.0, 0.0, W, H, 1)])
+
+    def test_the_label_inset_is_at_most_half_a_short_cell(self):
+        cells = by_key(build_cells({"a/x": 1}, 100.0, 10.0, label_inset=16.0))
+        self.assertAlmostEqual(cells["a/."].y, 5.0)
+        self.assertAlmostEqual(cells["a/."].h, 5.0)
+        cells = by_key(build_cells({"a/x": 1}, 100.0, 40.0, label_inset=16.0))
+        self.assertAlmostEqual(cells["a/."].y, 16.0)
+
     def test_an_item_that_improves_the_strip_aspect_ratio_stays_in_the_strip(self):
         # On a 4:1 map, four equal items make four squares in one strip.
         cells = build_cells({"a/x": 1, "b/x": 1, "c/x": 1, "d/x": 1}, 4.0, 1.0)

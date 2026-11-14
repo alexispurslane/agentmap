@@ -216,7 +216,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None:
     parts = rel_path.split("/")
     top = parts[0] if len(parts) > 1 else ROOT_FILES
     level1 = keys.get(top) or keys.get(ELLIPSIS)
-    if level1 is None or level1.key != top or top == ROOT_FILES:
-        return level1
+    # Root files and paths in the level-1 `…` cell have no level-2 cell, so
+    # both lookups below miss and the level-1 cell is the answer.
     sub = parts[1] if len(parts) > 2 else ROOT_FILES
     return keys.get(f"{top}/{sub}") or keys.get(f"{top}/{ELLIPSIS}") or level1
