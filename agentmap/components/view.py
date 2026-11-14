@@ -306,17 +306,36 @@ def cell_edits(cells: list[Cell], forest: Forest, events: list[Event]) -> dict[s
             found[e.text].append(e)
     by_cell: dict[str, list[FileEdit]] = defaultdict(list)
     for path, edits in found.items():
-        cell = locate(cells, path)
-        if cell is None:
-            continue
         edits.sort(key=lambda e: e.at, reverse=True)
         edit = FileEdit(path, edits[0].at, tuple(dict.fromkeys(e.thread_id for e in edits)))
-        by_cell[cell.key].append(edit)
-        if cell.depth == 2:
-            by_cell[cell.key.split("/")[0]].append(edit)
+        for key in cells_of(cells, path):
+            by_cell[key].append(edit)
     for files in by_cell.values():
         files.sort(key=lambda f: (f.at, f.path), reverse=True)
     return dict(by_cell)
+
+
+def cells_of(cells: list[Cell], path: str) -> list[str]:
+    """The keys of the cells that hold the file `path`: the one that `locate`
+    gives, and the directory cell above it. None for a path outside the map."""
+    cell = locate(cells, path)
+    if cell is None:
+        return []
+    return [cell.key, cell.key.split("/")[0]] if cell.depth == 2 else [cell.key]
+
+
+def heaviest_files(cells: list[Cell], key: str, weights: Mapping[str, int], n: int) -> list[tuple[str, int]]:
+    """The `n` files of the cell `key` with the most weight, heaviest first, as (path, weight).
+
+    Files that weigh 0, such as binary files, are left out.
+    """
+    found = [(path, w) for path, w in weights.items() if w > 0 and key in cells_of(cells, path)]
+    return sorted(found, key=lambda f: (-f[1], f[0]))[:n]
+
+
+def format_size(n: int) -> str:
+    """A byte count as `900 B` under 1000, else in kB with one decimal, as `12.3 kB`."""
+    return f"{n} B" if n < 1000 else f"{n / 1000:.1f} kB"
 
 
 def cell_threads(files: list[FileEdit]) -> list[str]:

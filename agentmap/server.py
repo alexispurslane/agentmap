@@ -18,6 +18,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Callable
 from urllib.parse import unquote, urlsplit
 
@@ -95,8 +96,11 @@ class Dashboard:
     def __init__(self, reader, store, cells: Callable[[], list[Cell]], project_name: str, *,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  refresh: float = 15.0, ping_every: float = 15.0,
-                 find_caller: Callable[[str, dict], str] | None = None, tickets=None):
+                 find_caller: Callable[[str, dict], str] | None = None, tickets=None,
+                 weights: Callable[[], Mapping[str, int]] = dict):
         self.reader = reader
+        # The map's weight of each file, for the box of a cell without edits.
+        self.weights = weights
         self.tickets = tickets
         self.store = store
         self.cells = cells
@@ -172,6 +176,7 @@ class CellCache:
         self._anchors: frozenset[str] = frozenset()
         # The weight of each file by size and time, so that a refresh reads only changed files.
         self._weights: dict = {}
+        self._weight_of: dict[str, int] = {}
 
     def __call__(self) -> list[Cell]:
         return self.cells
@@ -179,8 +184,13 @@ class CellCache:
     def anchors(self) -> frozenset[str]:
         return self._anchors
 
+    def weights(self) -> dict[str, int]:
+        """The weight of each file of the last refresh, by project-relative path."""
+        return self._weight_of
+
     def refresh(self) -> None:
         weights = code_weights(self.root, self._weights)
+        self._weight_of = weights
         self.cells = build_cells(weights, MAP_W, MAP_H)
         self._anchors = anchors(weights)
 
@@ -278,7 +288,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif kind == "c":
             cells, forest, events, now = self.dashboard.view
             if any(c.key == key for c in cells):
-                html = cell_peek(key, cells, forest, events, now, pinned)
+                html = cell_peek(key, cells, forest, events, now, pinned, self.dashboard.weights())
         if html is None:
             self._error(404, "no such box")
             return

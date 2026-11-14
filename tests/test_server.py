@@ -390,8 +390,11 @@ class CellCacheTest(unittest.TestCase):
             (Path(tmp) / "top.py").write_text("x\n")
             cache = CellCache(Path(tmp))
             self.assertEqual(cache.anchors(), frozenset())
+            self.assertEqual(cache.weights(), {})
             cache.refresh()
             self.assertEqual(cache.anchors(), frozenset({"lib/deep"}))
+            self.assertEqual(set(cache.weights()), {"lib/deep/a.py", "top.py"})
+            self.assertGreater(cache.weights()["top.py"], 0)
 
 
 class TicketFragmentTest(unittest.TestCase):
@@ -481,6 +484,11 @@ class TicketFragmentTest(unittest.TestCase):
         resp, data = self.get(self.serve(), "/pin/c/src")
         self.assertEqual(resp.status, 200)
         self.assertIn(b'class="close unpin"', data)
+
+    def test_the_box_of_a_cell_without_edits_lists_its_heaviest_files(self):
+        self.dash.weights = lambda: {"src/a/big.py": 2000, "src/a/small.py": 10}
+        resp, data = self.get(self.serve(), "/peek/c/src")
+        self.assertIn(b'<span class="cf-path">a/big.py</span><span class="cf-age">2.0 kB</span>', data)
 
     def test_an_unknown_cell_or_kind_has_no_box(self):
         port = self.serve()

@@ -57,7 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     # names their thread from T3 Code's record of the call.
     find_caller = CallerFinder(
         lambda tool, arguments: reader.find_tool_calls(tool, arguments, datetime.now(timezone.utc)))
-    dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller, tickets=tickets)
+    dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller, tickets=tickets,
+                          weights=cells.weights)
     server = make_server(dashboard, "127.0.0.1", args.port)
     stop = threading.Event()
     def poll_tickets(stop: threading.Event) -> None:  # pragma: no cover - a timer loop

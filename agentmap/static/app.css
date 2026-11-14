@@ -292,6 +292,7 @@ body {
 .unpin { float: right; position: sticky; top: 0; margin: -4px -8px 0 8px; background: var(--ground); }
 .peek-title { margin: 0 0 4px; font-size: 17px; line-height: 1.3; }
 /* A cell's box: one line per edited file, newest first. */
+.peek .empty { margin: 4px 0 8px; }
 .cf-list { list-style: none; margin: 0; padding: 0; }
 .cf { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--rule-soft); }
 .cf-path { font: 14px/1.35 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

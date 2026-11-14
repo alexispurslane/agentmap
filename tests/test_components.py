@@ -763,6 +763,28 @@ class CellPeekTest(unittest.TestCase):
         self.assertEqual([p for p, *_ in peek_lines(html)], ["README.md"])
 
 
+    def test_a_cell_without_edits_shows_its_five_heaviest_files_with_their_size(self):
+        weights = {"src/a/small.py": 40, "src/a/big.py": 12_345, "src/a/deep/mid.py": 900,
+                   "src/a/x1.py": 500, "src/a/x2.py": 300, "src/a/x3.py": 200,
+                   "src/a/logo.png": 0, "src/b/huge.py": 99_999, "docs/huge.md": 99_999}
+        html = cell_peek("src/a", CELLS, self.forest, [], NOW, weights=weights)
+        self.assertIn('<p class="empty">No agent edited a file here in the event window. '
+                      'The largest files by compressed size:</p>', html)
+        self.assertEqual(peek_lines(html), [("big.py", "12.3 kB", []), ("deep/mid.py", "900 B", []),
+                                            ("x1.py", "500 B", []), ("x2.py", "300 B", []),
+                                            ("x3.py", "200 B", [])])
+
+    def test_a_directory_cell_without_edits_lists_the_files_of_its_subdirectories(self):
+        weights = {"src/a/x.py": 10, "src/b/y.py": 20, "docs/z.md": 30}
+        html = cell_peek("src", CELLS, self.forest, [], NOW, weights=weights)
+        self.assertEqual([p for p, *_ in peek_lines(html)], ["b/y.py", "a/x.py"])
+
+    def test_a_cell_with_edits_lists_only_the_edits(self):
+        html = cell_peek("src/a", CELLS, self.forest, [event("t", "edits", 2, "src/a/x.py")], NOW,
+                         weights={"src/a/big.py": 99_999, "src/a/x.py": 1})
+        self.assertEqual([p for p, *_ in peek_lines(html)], ["x.py"])
+        self.assertNotIn("largest", html)
+
     def test_each_kind_of_cell_has_a_title_and_shows_paths_inside_its_folder(self):
         cells = [Cell("src", "src", 1, 0, 0, 500, 600, 1), Cell("src/.", ".", 2, 0, 16, 200, 584, 1),
                  Cell("src/…", "…", 2, 200, 16, 300, 584, 1), Cell("…", "…", 1, 500, 0, 580, 600, 1)]
