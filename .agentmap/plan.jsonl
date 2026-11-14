@@ -11,3 +11,6 @@
 {"ts": "2026-11-14T15:25:01Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "mark", "id": "3.1", "state": "done"}
 {"ts": "2026-11-14T15:25:01Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "mark", "id": "3.2", "state": "doing"}
 {"ts": "2026-11-14T15:25:01Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "status", "text": "Checking the page on real data"}
+{"ts": "2026-11-14T15:40:19Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "mark", "id": "3.2", "state": "done"}
+{"ts": "2026-11-14T15:40:19Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "mark", "id": "4", "state": "done"}
+{"ts": "2026-11-14T15:40:19Z", "thread": "deb79e0c-a62f-4d58-8748-bd71d5166cba", "op": "status", "text": "Done; waiting for the user"}
