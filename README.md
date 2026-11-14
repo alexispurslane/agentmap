@@ -4,7 +4,7 @@ agentmap is a live dashboard for a portrait side monitor. It shows what every Cl
 
 - The map at the top is a treemap of the project. Each directory gets an area in proportion to its lines of code. Each thread is a dot, with a tag such as `B2`, in the area of the file that it touched last. Small square marks show the other areas that it touched recently.
 - The tree below has one card per thread. A subagent's card sits inside the card of the thread that started it. A card shows what the thread does now, its newest thought, and the first sentence of its last message.
-- Agents can post an overall goal, a status line and a two-level todo list through MCP. The card shows them. A finished top-level item collapses to one line.
+- Agents can post a status line through MCP. The agent row shows it when it is the newest thing the agent said.
 
 The server uses the Python 3 standard library only. The page uses Datastar 1.0.5, which the repository includes. The design is in [docs/plans/agentmap.md](docs/plans/agentmap.md).
 
@@ -31,11 +31,11 @@ Options:
 
 The server listens on `127.0.0.1` only.
 
-## Let agents post their plans
+## Let agents post a status line
 
-The same server is an MCP server at `http://127.0.0.1:7788/mcp`. It gives agents five tools: `set_goal`, `set_status`, `add_todos`, `mark_todo` and `get_plan`. Its instructions tell the agents the right moment for each tool.
+The same server is an MCP server at `http://127.0.0.1:7788/mcp`. It gives agents one tool, `set_status`. Its instructions tell the agents to post a line after each major step, and to start the line with the `tk` ticket id that they work on.
 
-The plans go to `.agentmap/plan.jsonl` in the watched project. The file is an append-only log. You can commit it to keep a history of the plans.
+The status lines go to `.agentmap/status.jsonl` in the watched project. The file is an append-only log.
 
 ### Claude Code
 

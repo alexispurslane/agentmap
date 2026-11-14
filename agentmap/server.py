@@ -4,7 +4,7 @@ One process serves three things on one port:
 
 - the page and its two static files,
 - `GET /stream`, a Server-Sent Events stream of Datastar `patch-elements` events,
-- `POST /mcp`, the MCP endpoint through which agents post their plans.
+- `POST /mcp`, the MCP endpoint through which agents post their status lines.
 
 The poller thread is the only caller of the T3 reader's `snapshot` and of
 the `app` component. It publishes each new app HTML to a `Hub`, and every open stream
@@ -70,7 +70,7 @@ class Hub:
 
 
 class Dashboard:
-    """The state behind the server: the reader, the plan store, the cells and the hub."""
+    """The state behind the server: the reader, the status store, the cells and the hub."""
 
     def __init__(self, reader, store, cells: Callable[[], list[Cell]], project_name: str, *,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -87,7 +87,7 @@ class Dashboard:
         self.hub = Hub()
         self.wake = threading.Event()
         self._last_render: datetime | None = None
-        self._last_plans = None
+        self._last_statuses = None
         self._last_cells = None
 
     def tick(self) -> bool:
@@ -97,15 +97,15 @@ class Dashboard:
         """
         now = self.clock()
         db_changed = self.reader.changed()
-        plans = self.store.plans()
+        statuses = self.store.statuses()
         cells = self.cells()
         due = self._last_render is None or now - self._last_render >= self.refresh
-        if not (db_changed or due or plans != self._last_plans or cells != self._last_cells):
+        if not (db_changed or due or statuses != self._last_statuses or cells != self._last_cells):
             return False
-        # The event log merges T3 Code's history with the plan log's history.
+        # The event log merges T3 Code's history with the status log's history.
         events = self.reader.events(now) + self.store.events()
-        html = app(self.reader.snapshot(now), plans, cells, events, now, self.project_name)
-        self._last_render, self._last_plans, self._last_cells = now, plans, cells
+        html = app(self.reader.snapshot(now), statuses, cells, events, now, self.project_name)
+        self._last_render, self._last_statuses, self._last_cells = now, statuses, cells
         return self.hub.publish(html)
 
     def run(self, stop: threading.Event) -> None:

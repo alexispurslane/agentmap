@@ -13,7 +13,7 @@ from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.tag.tag import tag
 from agentmap.components.view import Forest, age_class, format_age, summary
 from agentmap.events import Event
-from agentmap.plan import Item, Plan
+from agentmap.status import Status
 from agentmap.t3 import AgentThread, Touch
 from agentmap.treemap import Cell
 
@@ -41,13 +41,8 @@ def thread(id, parent=None, *, title=None, created=60, updated=0, state="working
         delegation=delegation)
 
 
-def plan(goal=None, items=(), status=None, status_at=None, updated=0):
-    return Plan(goal, status, tuple(items), ago(updated),
-                status_at=status_at if status_at is None else ago(status_at))
-
-
-def item(id, text, state="todo", children=(), changed=0):
-    return Item(id, text, state, tuple(children), ago(changed))
+def status(text, minutes=0):
+    return Status(text, ago(minutes))
 
 
 def event(thread_id, kind, minutes, text=""):
@@ -62,8 +57,8 @@ CELLS = [
 ]
 
 
-def render(threads, plans=None, cells=CELLS, events=()):
-    return app(threads, plans or {}, cells, list(events), NOW, "demo")
+def render(threads, statuses=None, cells=CELLS, events=()):
+    return app(threads, statuses or {}, cells, list(events), NOW, "demo")
 
 
 def row(html, tag):
@@ -115,12 +110,11 @@ def log_entries(html):
 
 CSS = (pathlib.Path(__file__).parent.parent / "agentmap" / "static" / "app.css").read_text()
 CSS_CLASSES = set(re.findall(r"\.([a-z][a-z0-9-]*)", CSS))
-# State classes that keep the default look on purpose: a plain verb in the log,
-# and an open box for an item that is still to do.
-UNSTYLED = {"started", "edits", "status", "added", "doing", "todo"}
+# State classes that keep the default look on purpose: a plain verb in the log.
+UNSTYLED = {"started", "edits", "status"}
 VOID = {"meta", "link", "br", "img", "input", "path", "circle"}
 STRUCTURAL = {"html", "head", "body", "main", "section", "article", "ol", "header", "nav", "svg", "g"}
-STRUCTURAL_DIVS = {"map-box", "kids", "scroll", "plan-grid"}
+STRUCTURAL_DIVS = {"map-box", "kids", "scroll"}
 
 
 class _Checker(HTMLParser):
@@ -176,27 +170,22 @@ SCENE = dict(
         thread("g", "k1", created=20, state="idle", touched=["docs/z", "src/a/q"]),
         thread("r2", created=10, touched=["docs/w", "src/b/1", "src/a/2"]),
     ],
-    plans={"r": plan("Cap lights", (
-        item("1", "Diagnose", "done", (item("1.1", "Count", "done"),)),
-        item("2", "Prototype", "doing", (item("2.1", "Cull", "done", changed=2),
-                                         item("2.2", "Take", "doing"),
-                                         item("2.3", "Mutants"))),
-        item("3", "Merge")), status="Merging", status_at=0)},
-    events=[event("r", "goal", 50, "Cap lights"), event("k1", "asks", 0.5, "Keep the old sort?"),
+    statuses={"r": status("Merging", 0)},
+    events=[event("r", "status", 50, "Cap lights"), event("k1", "asks", 0.5, "Keep the old sort?"),
             event("r2", "edits", 2, "docs/w"), event("r2", "edits", 3, "src/b/1"),
             event("k2", "finished", 30, "Done."), event("gone", "started", 1, "Not in snapshot")],
 )
 
 
 def scene():
-    return render(SCENE["threads"], SCENE["plans"], events=SCENE["events"])
+    return render(SCENE["threads"], SCENE["statuses"], events=SCENE["events"])
 
 
 class TemplateTest(unittest.TestCase):
     def test_every_component_folder_has_a_function_file_and_a_template(self):
         root = pathlib.Path(__file__).parent.parent / "agentmap" / "components"
         folders = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith("_")]
-        self.assertGreaterEqual(len(folders), 11)
+        self.assertGreaterEqual(len(folders), 9)
         for d in folders:
             self.assertTrue((d / f"{d.name}.py").is_file(), d.name)
             self.assertTrue((d / f"{d.name}.html").is_file(), d.name)
@@ -225,12 +214,13 @@ class PageTest(unittest.TestCase):
         self.assertIn('<link rel="stylesheet" href="/static/app.css">', html)
         self.assertIn('<main id="app"></main>', html)
 
-    def test_the_app_is_one_main_element_with_its_five_parts_in_order(self):
+    def test_the_app_is_one_main_element_with_its_four_parts_in_order(self):
         html = scene()
         self.assertTrue(html.startswith('<main id="app">'))
         self.assertTrue(html.endswith("</main>"))
+        self.assertNotIn('id="plans"', html)
         order = [html.index(x) for x in ('<nav id="rail"', '<section id="map"', '<section id="tree"',
-                                         '<section id="log"', '<section id="plans"')]
+                                         '<section id="log"')]
         self.assertEqual(order, sorted(order))
 
 
@@ -242,7 +232,7 @@ class MarkupTest(unittest.TestCase):
     def test_every_class_in_the_markup_has_a_style(self):
         classes = check(scene()).classes | check(render([])).classes
         self.assertEqual(classes - CSS_CLASSES - UNSTYLED, set())
-        self.assertEqual(UNSTYLED & CSS_CLASSES - {"doing"}, set())
+        self.assertEqual(UNSTYLED & CSS_CLASSES, set())
 
     def test_element_ids_are_unique(self):
         ids = re.findall(r' id="([^"]+)"', scene())
@@ -251,9 +241,9 @@ class MarkupTest(unittest.TestCase):
     def test_all_text_from_agents_is_escaped(self):
         html = render([thread("t", title="<script>x</script>", now="Editing <blink>",
                               thought="a & b", thought_at=0)],
-                      {"t": plan("<i>goal</i>", (item("1", "<u>"),))},
+                      {"t": status("<i>goal</i>", 0)},
                       events=[event("t", "asks", 0, "<em>?</em>")])
-        for raw in ("<script>x", "<blink>", "<i>goal", "<u>", "<em>"):
+        for raw in ("<script>x", "<blink>", "<i>goal", "<em>"):
             self.assertNotIn(raw, html)
         self.assertIn("&lt;script&gt;", html)
 
@@ -283,15 +273,11 @@ class CarriedOverTest(unittest.TestCase):
         places = [r.index(x) for x in parts]
         self.assertEqual(places, sorted(places))
 
-    def test_an_item_without_children_has_no_nested_list(self):
-        b = section(render([thread("t")], {"t": plan("G", (item("1", "Leaf"),))}), "plans")
-        self.assertEqual(b.count('<ol class="items">'), 1)
-
     def test_the_page_has_a_title(self):
         self.assertIn("<title>agentmap</title>", page(""))
 
     def test_the_highlight_class_has_a_style_for_each_linked_mark(self):
-        for selector in (".dot.hl", ".row.hl", ".ev.hl", ".plan.hl"):
+        for selector in (".dot.hl", ".row.hl", ".ev.hl"):
             self.assertIn(selector, CSS)
 
 
@@ -343,14 +329,14 @@ class AgeTest(unittest.TestCase):
 class SummaryTest(unittest.TestCase):
     def test_the_summary_is_the_newest_of_status_message_and_thought(self):
         t = thread("t", thought="Thinking.", thought_at=1, last_said="Said.", said_at=5)
-        self.assertEqual(summary(t, plan(status="Posted.", status_at=9)).kind, "thought")
-        self.assertEqual(summary(t, plan(status="Posted.", status_at=0)).kind, "status")
+        self.assertEqual(summary(t, status("Posted.", 9)).kind, "thought")
+        self.assertEqual(summary(t, status("Posted.", 0)).kind, "status")
         t = thread("t", thought="Thinking.", thought_at=8, last_said="Said.", said_at=5)
         self.assertEqual(summary(t, None).text, "Said.")
 
     def test_on_a_tie_the_posted_status_wins_then_the_message(self):
         t = thread("t", thought="Thinking.", thought_at=2, last_said="Said.", said_at=2)
-        self.assertEqual(summary(t, plan(status="Posted.", status_at=2)).kind, "status")
+        self.assertEqual(summary(t, status("Posted.", 2)).kind, "status")
         self.assertEqual(summary(t, None).kind, "said")
 
     def test_a_source_without_a_time_loses_to_any_source_with_one(self):
@@ -359,7 +345,6 @@ class SummaryTest(unittest.TestCase):
 
     def test_a_thread_with_nothing_to_say_has_no_summary(self):
         self.assertIsNone(summary(thread("t"), None))
-        self.assertIsNone(summary(thread("t"), plan(goal="G")))
 
 
 class AgentRowTest(unittest.TestCase):
@@ -494,16 +479,12 @@ class MapTest(unittest.TestCase):
 class EventLogTest(unittest.TestCase):
     def test_entries_are_newest_first_with_clock_tag_verb_and_ink(self):
         html = render([thread("a", created=90), thread("b", created=80)],
-                      events=[event("a", "goal", 20, "Ship it"), event("b", "asks", 0.5, "Merge now?"),
-                              event("a", "done", 3, "Cull pass")])
+                      events=[event("a", "status", 20, "Ship it"), event("b", "asks", 0.5, "Merge now?"),
+                              event("a", "finished", 3, "Cull pass")])
         self.assertEqual(log_entries(html), [("asks", "a0", "B", "asks Merge now?"),
-                                             ("done", "a1", "A", "done Cull pass"),
-                                             ("goal", "a3", "A", "goal Ship it")])
+                                             ("finished", "a1", "A", "finished Cull pass"),
+                                             ("status", "a3", "A", "status Ship it")])
         self.assertIn(f"<time>{ago(0.5).astimezone().strftime('%H:%M')}</time>", html)
-
-    def test_doing_reads_as_starts(self):
-        html = render([thread("a")], events=[event("a", "doing", 1, "Timed take")])
-        self.assertEqual(log_entries(html)[0][3], "starts Timed take")
 
     def test_a_run_of_edits_by_one_thread_is_one_entry_with_a_count(self):
         html = render([thread("a", created=90), thread("b", created=80)],
@@ -518,57 +499,12 @@ class EventLogTest(unittest.TestCase):
         self.assertIn('<p class="empty">No events in the window.</p>', html)
 
     def test_the_log_keeps_at_most_sixty_entries(self):
-        html = render([thread("a")], events=[event("a", "goal", i, f"g{i}") for i in range(70)])
+        html = render([thread("a")], events=[event("a", "status", i, f"g{i}") for i in range(70)])
         self.assertEqual(len(log_entries(html)), 60)
 
     def test_an_entry_links_to_its_thread_through_the_hover_signal(self):
-        html = render([thread("a")], events=[event("a", "goal", 1, "G")])
+        html = render([thread("a")], events=[event("a", "status", 1, "G")])
         self.assertIn("data-on:mouseenter=\"$hover = 'A'\"", section(html, "log"))
-
-
-class PlanBoardTest(unittest.TestCase):
-    def board(self, items, goal="Cap lights", **kw):
-        return section(render([thread("t")], {"t": plan(goal, items, **kw)}), "plans")
-
-    def test_the_board_shows_each_plan_with_its_tag_and_goal(self):
-        b = self.board([])
-        self.assertIn('<span class="tag" style="--hue:75.0">A</span>', b)
-        self.assertIn('<span class="goal a0">Cap lights</span>', b)
-        self.assertIn("<small>1 plan</small>", b)
-
-    def test_a_done_top_item_is_one_line_with_a_count(self):
-        b = self.board([item("1", "Diagnose", "done", (item("1.1", "Count", "done"),
-                                                       item("1.2", "Profile", "done")))])
-        self.assertIn('<span class="count-of">2/2</span>', b)
-        self.assertNotIn("Count", b)
-
-    def test_an_open_top_item_lists_its_children_inked_by_age(self):
-        b = self.board([item("2", "Prototype", "doing", (
-            item("2.1", "Cull", "done", changed=20), item("2.2", "Take", "doing", changed=0),
-            item("2.3", "Mutants")))])
-        self.assertIn('<span class="count-of">1/3</span>', b)
-        self.assertRegex(b, r'<li class="item done a3"[^>]*><span class="box"></span><span class="t">Cull</span></li>')
-        self.assertRegex(b, r'<li class="item doing a0"[^>]*><span class="box"></span><span class="t">Take</span></li>')
-
-    def test_a_plan_with_no_goal_and_no_items_is_left_out(self):
-        html = render([thread("t")], {"t": plan(status="Only a status", status_at=0)})
-        self.assertIn('<p class="empty">No agent posted a plan yet.</p>', html)
-        self.assertIn("<small>0 plans</small>", html)
-
-    def test_a_plan_without_a_goal_still_shows_its_items(self):
-        b = self.board([item("1", "Only item")], goal=None)
-        self.assertIn("Only item", b)
-        self.assertNotIn('class="goal', b)
-
-    def test_plans_follow_tag_order_and_skip_threads_outside_the_snapshot(self):
-        html = render([thread("r", created=90), thread("k", "r", created=10)],
-                      {"k": plan("Kid goal"), "r": plan("Root goal"), "gone": plan("Gone goal")})
-        b = section(html, "plans")
-        self.assertLess(b.index("Root goal"), b.index("Kid goal"))
-        self.assertNotIn("Gone goal", b)
-
-    def test_a_plan_links_to_its_thread_through_the_hover_signal(self):
-        self.assertIn("data-class:hl=\"$hover == 'A'\"", self.board([]))
 
 
 class RailTest(unittest.TestCase):
@@ -593,14 +529,12 @@ class SettledTest(unittest.TestCase):
                    thread("k2", "r", created=40, delegation="running", touched=["docs/a"])]
         if grandkid:
             threads.append(thread("g", "k", created=20, state=grandkid, delegation="running"))
-        return render(threads, {"k": plan("Kid goal"), "k2": plan("Other goal")},
-                      events=[event("k", "finished", 0.5, "All done.")])
+        return render(threads, events=[event("k", "finished", 0.5, "All done.")])
 
-    def test_a_completed_subagent_leaves_the_map_the_tree_and_the_plans(self):
+    def test_a_completed_subagent_leaves_the_map_and_the_tree(self):
         html = self.scene()
         self.assertNotIn('data-tag="A1"', section(html, "tree"))
         self.assertNotIn("A1", [t for t, *_ in dots(html)])
-        self.assertNotIn("Kid goal", section(html, "plans"))
 
     def test_cancelled_and_interrupted_subagents_also_leave(self):
         for status in ("cancelled", "interrupted"):

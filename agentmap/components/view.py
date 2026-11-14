@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from agentmap.plan import Plan
+from agentmap.status import Status
 from agentmap.t3 import AgentThread
 
 # Each thread gets its own OKLCH hue. In order of creation, each hue is the
@@ -149,15 +149,15 @@ class Summary:
     at: datetime | None
 
 
-def summary(thread: AgentThread, plan: Plan | None) -> Summary | None:
+def summary(thread: AgentThread, status: Status | None) -> Summary | None:
     """The newest of the posted status, the last message and the newest thought.
 
     A source without a time counts as older than any source with one. On a
     tie, the posted status wins, then the message, then the thought.
     """
     sources = []
-    if plan is not None and plan.status:
-        sources.append(Summary("status", plan.status, plan.status_at))
+    if status is not None:
+        sources.append(Summary("status", status.text, status.at))
     if thread.last_said:
         sources.append(Summary("said", thread.last_said, thread.said_at))
     if thread.thought:

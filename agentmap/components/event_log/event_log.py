@@ -4,9 +4,6 @@ from agentmap.components._template import render
 from agentmap.components.view import Forest, age_class, clock, element_id
 from agentmap.events import Event
 
-VERBS = {"started": "started", "edits": "edits", "asks": "asks", "finished": "finished",
-         "failed": "failed", "goal": "goal", "status": "status", "added": "added",
-         "doing": "starts", "done": "done"}
 # At most this many entries, after edits are grouped.
 LIMIT = 60
 
@@ -33,7 +30,7 @@ def event_log(events: list[Event], forest: Forest, now: datetime) -> str:
             break
         entries.append({
             "id": element_id("e", f"{e.thread_id}|{e.kind}|{e.at.isoformat()}|{e.text}"),
-            "thread": e.thread_id, "kind": e.kind, "verb": VERBS[e.kind],
+            "thread": e.thread_id, "kind": e.kind, "verb": e.kind,
             "tag": forest.tag[e.thread_id], "hue": forest.hue[e.thread_id],
             "enter": "mouseenter", "clock": clock(e.at), "age": age_class(now, e.at),
             "path": e.text if e.kind == "edits" else "",

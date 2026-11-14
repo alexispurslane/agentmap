@@ -5,7 +5,7 @@ agentmap is a dashboard for a portrait side monitor. It shows what every Claude 
 - In space: a dot on a map of the project, in the area of the files that the thread works on.
 - In the ownership tree: a card under the card of the thread that started it.
 
-Agents can also post their own overall goal and a two-level todo list through a small MCP server in the same process.
+Agents can also post a status line through a small MCP server in the same process. The bottom of the page shows the project's `tk` tickets by epic.
 
 ## Decisions
 
@@ -15,12 +15,13 @@ The user chose these points on 2026-11-14:
 |---|---|
 | Where space shows | One shared map over the top part of the screen, with one dot per thread. |
 | Map shape | A treemap: each directory gets an area in proportion to its code size. |
-| Where the plan log is stored | In the watched project's repository, in `.agentmap/plan.jsonl`. |
+| Where the status log is stored | In the watched project's repository, in `.agentmap/status.jsonl`. |
 | How a Codex caller is identified | By the `X-T3-Thread` header if it is there, else by T3 Code's record of the call (see `caller.py`). |
 
 Other fixed points:
 
-- The backend uses the Python 3.14 standard library only. Test tools (coverage, pytest, mutmut) come from the Nix dev shell.
+- The backend uses the Python 3.14 standard library and one vendored package: the Mustache engine chevron 0.14.0, in `agentmap/vendor/chevron`. Test tools (coverage, pytest, mutmut) come from the Nix dev shell.
+- Plans (goal and todo list through MCP) were removed on 2026-11-14. The project's `tk` tickets show intent instead. See `docs/plans/ticket-bar.md`.
 - The frontend is Datastar 1.0.5, vendored in `agentmap/static/datastar.js`. The server sends HTML fragments. The page has no other script.
 - One server process watches one project. It serves the page, the event stream and the MCP endpoint on one port.
 
@@ -28,8 +29,7 @@ Other fixed points:
 
 - Thread: one T3 Code thread. A subagent started by `delegate_task` or by Claude's Agent tool is also a thread, with a parent.
 - Root thread: a thread with no parent.
-- Plan: the goal, the status line and the todo items that one thread posts through MCP.
-- Item: one entry in a plan's todo list. A top-level item can have child items. A child item cannot have children.
+- Status line: one line that a thread posts through MCP about what it does or waits for now.
 - Now line: one line of text that tells what the thread does at this moment, for example `Editing src/render/cull.rs`.
 - Cell: one rectangle of the treemap. A cell stands for one directory, or for the files directly in one directory.
 - Touched path: a file path, relative to the project root, that a thread read or changed.
@@ -38,94 +38,45 @@ Other fixed points:
 
 ```
 T3 Code statev2.sqlite --(read-only, poll)--> t3.py  --\
-project files (git ls-files) --> treemap.py ------------>  render.py --> SSE /stream --> Datastar page
-.agentmap/plan.jsonl <--> plan.py <-- mcp.py <-- POST /mcp <-- agents
+project files (git ls-files) --> treemap.py ------------>  components/ --> SSE /stream --> Datastar page
+.agentmap/status.jsonl <--> status.py <-- mcp.py <-- POST /mcp <-- agents
 ```
 
-The poller thread in `server.py` is the only caller of `t3.py` and `render.py`. It renders the whole `<main id="app">` element. If the HTML differs from the last HTML, it publishes it to every open stream. Datastar morphs the new element into the page, so the DOM changes only where the HTML changed.
+The poller thread in `server.py` is the only caller of `t3.py` and of the components. It renders the whole `<main id="app">` element. If the HTML differs from the last HTML, it publishes it to every open stream. Datastar morphs the new element into the page, so the DOM changes only where the HTML changed.
 
 ## Module contracts
 
 All modules live in the package `agentmap/`. Tests live in `tests/` and use `unittest`. Each module below has one owner ticket.
 
-### plan.py: the plan store
-
-The plan store keeps the plans of all threads of one project. Its source of truth is an append-only log, one JSON object per line. The in-memory state is the fold of the log.
+### status.py: the status store
 
 ```python
-class PlanError(ValueError): ...           # a rejected request; the message is shown to the agent
-
-class PlanStore:
-    def __init__(self, log_path: pathlib.Path): ...   # replays the log if it exists
-    def set_goal(self, thread: str, text: str) -> None: ...
+class StatusError(ValueError): ...     # a refused status; the message is shown to the agent
+@dataclass(frozen=True)
+class Status:
+    text: str
+    at: datetime                       # UTC, the `ts` of the log record
+class StatusStore:
+    def __init__(self, log_path: pathlib.Path): ...
     def set_status(self, thread: str, text: str) -> None: ...
-    def add_items(self, thread: str, texts: list[str], parent: str | None = None,
-                  children: list[list[str]] | None = None) -> list[str]: ...  # returns new ids
-    def mark(self, thread: str, item_id: str, state: str) -> None: ...  # state is "doing" or "done"
-    def plan(self, thread: str) -> Plan | None: ...
-    def plans(self) -> dict[str, Plan]: ...
-    def events(self) -> list[Event]: ...      # newest first, at most 200, all threads
-    def check_invariants(self) -> None: ...   # raises AssertionError on a broken invariant
+    def status(self, thread: str) -> Status | None: ...
+    def statuses(self) -> dict[str, Status]: ...
+    def events(self) -> list[Event]: ...     # newest first, at most 200
+    def check_invariants(self) -> None: ...
 ```
 
-`Plan` and `Item` are frozen dataclasses: `Plan(goal, status, items, updated_at, status_at)` and `Item(id, text, state, children, changed_at)`.
-
-Times. Every time in a plan is the `ts` of a log record. Thus a replay gives the same times.
-
-- `updated_at` is the time of the last change to the plan.
-- `status_at` is the time of the latest status line, or `None` when the thread never set one.
-- A leaf's `changed_at` is the time of its creation or of its latest state change.
-- A parent's `changed_at` is the latest `changed_at` of the parent itself and its children.
-
-Events. `events()` gives what agents posted, as `Event` values (see `events.py`), newest first. Each change gives events:
-
-| Change | Events |
-|---|---|
-| `set_goal` | One `goal` event. The text is the goal. |
-| `set_status` | One `status` event. The text is the status line. |
-| `add_items` | One `added` event per new item, children included. The text is the item text. |
-| `mark` | One `doing` or `done` event. The text is the text of the marked item. A parent whose derived state changes gets no event. |
-
-A request that changes nothing gives no event. The store keeps only the newest 200 events in memory. Events at the same second keep the order of the log.
-
-Rules:
-
-- Item ids are positions: top-level items are `"1"`, `"2"`, and so on. Children of item 2 are `"2.1"`, `"2.2"`, and so on. Because no item is ever deleted, an id never changes.
-- A leaf item has the state `todo`, `doing` or `done`. The state moves only forward. A jump from `todo` to `done` is legal. A request to move back raises `PlanError`. A request for the current state does nothing.
-- An item with children has a derived state, with three cases:
-  - When all children are done, the state is `done`.
-  - When at least one child is `doing` or `done`, but not all children are done, the state is `doing`.
-  - When all children are `todo`, the state is `todo`.
-- A request to mark an item with children raises `PlanError`.
-- A done item gets no new children. Thus a done item stays done. The request raises `PlanError` with a hint to add a new top-level item.
-- Texts are stripped. An empty text raises `PlanError`. A goal has at most 500 characters, a status line 160, an item 200. Longer text raises `PlanError`.
-- Each change appends one line to the log before it changes memory, and the store flushes the file. A lock makes the methods safe across threads.
-- A log line that does not parse is skipped with a warning on stderr. The store does not stop for it.
-
-Log lines:
-
-```json
-{"ts": "2026-11-14T14:40:00Z", "thread": "deb79e0c-...", "op": "goal", "text": "..."}
-{"ts": "...", "thread": "...", "op": "status", "text": "..."}
-{"ts": "...", "thread": "...", "op": "add", "parent": null, "texts": ["a", "b"], "children": [["a1"], []]}
-{"ts": "...", "thread": "...", "op": "mark", "id": "2.1", "state": "done"}
-```
-
-Invariants, which `check_invariants` tests:
-
-1. In each plan, top-level ids are `1..n` without gaps, and the children of item `k` are `k.1..k.m` without gaps.
-2. No item is deeper than two levels.
-3. Each leaf state is one of `todo`, `doing`, `done`.
-4. Each parent state equals the state derived from its children.
-5. A fresh replay of the log gives the same plans as the memory.
-6. A fresh replay of the log gives the same events as the memory.
+- The source of truth is an append-only log, one JSON object per line: `{"ts", "thread", "op": "status", "text"}`. The memory is the fold of the log.
+- A text is stripped. An empty text, a text over 160 characters, and a text that is not a string raise `StatusError`.
+- A new status replaces the thread's old one. A new text makes a `status` event. The same text again renews the time but makes no event.
+- A replay skips records of other kinds, such as the old plan records, and warns about lines that are not valid.
+- Invariants: a fresh replay of the log gives the same statuses and the same events as the memory.
 
 ### mcp.py: the MCP endpoint
 
 `mcp.py` implements the smallest part of the MCP Streamable HTTP transport that Claude Code and Codex need. It has no network code. The server calls one function:
 
 ```python
-def handle(body: bytes, headers: Mapping[str, str], store: PlanStore,
+def handle(body: bytes, headers: Mapping[str, str], store: StatusStore,
            thread_project: Callable[[str], bool | None]) -> tuple[int, dict[str, str], bytes]: ...
 ```
 
@@ -144,10 +95,10 @@ Behavior:
 - The body is one JSON-RPC 2.0 message. A batch (a JSON array) gets error `-32600`.
 - `initialize`: the result has `protocolVersion`, `capabilities: {"tools": {}}`, `serverInfo` and `instructions`.
   - For `protocolVersion`, the server supports `2025-06-18`, `2025-03-26` and `2024-11-05`. For a supported client version, the server answers with that version. For another version, the server answers with `2025-06-18`.
-  - The `instructions` text tells the agent the right moment for each tool.
+  - The `instructions` text tells the agent to call `set_status` after each major step, and to start the line with the `tk` ticket id that it works on.
 - `ping`: an empty result.
-- `tools/list`: the five tools below with JSON Schema inputs.
-- `tools/call`: runs the tool. A `PlanError` becomes a result with `isError: true` and the message as text. A success returns the plan outline as text.
+- `tools/list`: the one tool below with its JSON Schema input.
+- `tools/call`: runs the tool. A `StatusError` becomes a result with `isError: true` and the message as text. A success returns `Status posted: <text>`. Another tool name gets error `-32602`.
 - A message without `id` is a notification. The answer is status 202 with an empty body.
 - An unknown method gets error `-32601`. Bad JSON gets error `-32700`.
 - The thread id comes from the header `X-T3-Thread`. Three header values are bad: no header, an empty header, and the literal text `${T3CODE_THREAD_ID}`.
@@ -160,25 +111,7 @@ Tools:
 
 | Tool | Input | Effect |
 |---|---|---|
-| `set_goal` | `goal: string` | Sets the overall goal of the calling thread. |
-| `set_status` | `status: string` | Sets one line about the current step. |
-| `add_todos` | `items: [{text, children?: [string]}]`, `parent?: string` | Adds top-level items, or with `parent`, adds children to one top-level item. With `parent`, an item must not have `children`. |
-| `mark_todo` | `id: string`, `state: "doing" \| "done"` | Moves one leaf item forward. |
-| `get_plan` | none | Returns the plan outline with ids. |
-
-The outline text format:
-
-```
-Goal: Cap lights per tile so the deck holds 60 fps.
-Status: Waiting on the timed take.
-1 [x] Diagnose budget overrun
-  1.1 [x] Count lights per tile
-2 [~] Prototype per-tile cap
-  2.1 [x] Cap in cull pass
-  2.2 [~] Timed take on hall and deck
-  2.3 [ ] Mutation pass
-3 [ ] Merge and close ticket
-```
+| `set_status` | `status: string` | Sets one line about what the thread does or waits for now. |
 
 ### caller.py: the thread of a call without a header
 
@@ -301,10 +234,10 @@ class Event:
     thread_id: str
     kind: str         # one of KINDS
     text: str         # the detail; "" when there is none
-KINDS = ("started", "edits", "asks", "finished", "failed", "goal", "status", "added", "doing", "done")
+KINDS = ("started", "edits", "asks", "finished", "failed", "status")
 ```
 
-An event is one dated fact about one thread. The page uses events for its running event log, and it fades each mark by its age. `T3Reader.events` makes the first five kinds. `PlanStore.events` makes the last five.
+An event is one dated fact about one thread. The page uses events for its running event log, and it fades each mark by its age. `T3Reader.events` makes the first five kinds. `StatusStore.events` makes `status`.
 
 ### treemap.py: the project map
 
@@ -323,27 +256,17 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 - `locate` returns the deepest cell whose key covers the path. A `…` cell covers the paths of the cells that it joined.
 - The server builds the cells at start and again every 10 minutes.
 
-### render.py: the HTML
+### components/: the HTML
 
-```python
-def render_page(app_html: str) -> Safe: ...
-def render_app(threads: list[AgentThread], plans: dict[str, Plan], cells: list[Cell],
-               now: datetime, project_name: str) -> Safe: ...
-```
-
-- `render_page` returns the whole document. The body has `data-init="@get('/stream', {openWhenHidden: true})"`.
-- `render_app` returns one `<main id="app">` element with `<section id="map">` and `<section id="tree">`.
-- Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°). Up to 8 threads, two hues are at least 32° apart.
-- A card's list of subagents has a thin guide line in the card's own hue. The line shows ownership.
-- A dot and its card are linked by the frontend signal `$hover`. Each sets it to its tag while the pointer is on it, and each gets the class `hl` while `$hover` holds its tag.
-- Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`. The tag shows on the dot and on the card, so that the reader can match them.
-- A dot sits in the cell of the thread's newest touched path. Dots in one cell sit on a small grid inside the cell, in tag order. A thread without a touched path has no dot.
-- A card shows the tag, title, provider and model, state, age, now line, thought, last said, status line and plan.
-- A cell with the key `.` or `<dir>/.` has the label `files`.
-- A plan shows its goal, then its items. A done top-level item shows as one line with a count, for example `✓ Diagnose budget overrun (3/3)`.
-- An idle child thread whose `updated_at` is more than 10 minutes old shows as one line.
-- All HTML is built with t-strings (PEP 750, Python 3.14) and `markup.html()`. `html()` escapes every interpolated value. The only exception is a `Safe` value, which is HTML that `html()` already made. Do not build HTML with f-strings.
-- The page is for a portrait screen of about 1080 × 1920 CSS pixels. The map takes about the top third.
+- Each folder `agentmap/components/<name>/` holds `<name>.py`, with one pure function that takes typed arguments and returns HTML, and `<name>.html`, its Mustache template. A template can include another component's template as a partial, for example `{{> hover}}`.
+- `components/_template.py` renders a template with chevron. Chevron escapes `{{value}}`. Attributes in templates use double quotes, because chevron does not escape `'`.
+- `components/view.py` holds the facts that several components share: the ownership tree (`Forest`), tags, hues, the ink ramp of ages (`a0` to `a4`), the summary line, and the rule that hides settled subagents.
+- `page` returns the whole document. `app` returns `<main id="app">` with the rail, the map, the agent tree and the event log.
+- Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°).
+- A dot, a row and a log entry are linked by the frontend signal `$hover`.
+- Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`.
+- An agent row shows its tool line (the now line) and one summary line: the newest of its status line, its last message and its newest thought.
+- The page is for a portrait screen of about 1080 × 1920 CSS pixels.
 
 ### server.py and `__main__.py`
 
@@ -356,7 +279,7 @@ python3 -m agentmap --project PATH [--port 7788] [--t3-db PATH] [--hours 3]
 - `POST /mcp` with an `Origin` header that is not `http://127.0.0.1:<port>` or `http://localhost:<port>` gets 403. This blocks DNS rebinding.
 - The poller thread runs every 250 ms. It renders again on three events:
   - `T3Reader.changed()` is true.
-  - The plan store changed.
+  - The status store changed.
   - 15 seconds passed since the last render. This render keeps ages such as `12m` current.
 - An SSE message is:
 

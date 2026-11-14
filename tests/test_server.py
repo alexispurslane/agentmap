@@ -10,8 +10,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from agentmap.plan import PlanStore
 from agentmap.server import CellCache, Dashboard, make_server, sse_patch
+from agentmap.status import StatusStore
 from agentmap.t3 import AgentThread, Touch
 from agentmap.treemap import Cell
 
@@ -55,7 +55,7 @@ class Clock:
 
 def make_dashboard(tmp, threads=(), **kw):
     reader = FakeReader(list(threads))
-    store = PlanStore(Path(tmp) / "plan.jsonl")
+    store = StatusStore(Path(tmp) / "status.jsonl")
     clock = Clock()
     dash = Dashboard(reader, store, lambda: CELLS, "demo", clock=clock, **kw)
     return dash, reader, store, clock
@@ -104,9 +104,9 @@ class TickTest(unittest.TestCase):
         self.reader.dirty = True
         self.assertFalse(self.dash.tick())
 
-    def test_a_plan_change_publishes_new_html(self):
+    def test_a_status_change_publishes_new_html(self):
         self.dash.tick()
-        self.store.set_goal("t1", "Ship the map")
+        self.store.set_status("t1", "Ship the map")
         self.assertTrue(self.dash.tick())
         self.assertIn("Ship the map", self.dash.hub.html)
 
@@ -207,7 +207,7 @@ class HttpTest(unittest.TestCase):
         self.assertIn("text/css", resp.getheader("Content-Type"))
 
     def test_only_known_static_files_are_served(self):
-        for path in ("/static/../server.py", "/static/plan.py", "/nothing"):
+        for path in ("/static/../server.py", "/static/status.py", "/nothing"):
             self.assertEqual(self.request("GET", path)[0].status, 404, path)
 
     def test_the_stream_sends_the_app_at_once(self):
@@ -256,7 +256,7 @@ class HttpTest(unittest.TestCase):
         resp, _ = self.mcp({"jsonrpc": "2.0", "id": 1, "method": "ping"})
         self.assertEqual(resp.getheader("Content-Type"), "application/json")
 
-    def test_a_goal_posted_through_mcp_reaches_the_stream(self):
+    def test_a_status_posted_through_mcp_reaches_the_stream(self):
         stop = threading.Event()
 
         def poll():
@@ -271,8 +271,8 @@ class HttpTest(unittest.TestCase):
             sock = self.open_stream()
             self.read_until(sock, b"\n\n")
             resp, data = self.mcp({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                   "params": {"name": "set_goal",
-                                              "arguments": {"goal": "Draw the map"}}})
+                                   "params": {"name": "set_status",
+                                              "arguments": {"status": "Draw the map"}}})
             self.assertEqual(resp.status, 200)
             self.assertFalse(json.loads(data)["result"].get("isError"))
             buf = self.read_until(sock, b"Draw the map")
@@ -287,11 +287,11 @@ class HttpTest(unittest.TestCase):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request("POST", "/mcp", json.dumps(
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "set_goal", "arguments": {"goal": "From Codex"}}}).encode(),
+             "params": {"name": "set_status", "arguments": {"status": "From Codex"}}}).encode(),
             {"Content-Type": "application/json"})
         self.assertEqual(conn.getresponse().status, 200)
         conn.close()
-        self.assertEqual(self.store.plan("codex-thread").goal, "From Codex")
+        self.assertEqual(self.store.status("codex-thread").text, "From Codex")
 
     def test_mcp_initialize_answers_with_json(self):
         resp, data = self.mcp({"jsonrpc": "2.0", "id": 1, "method": "initialize",

@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agentmap.caller import CallerFinder
-from agentmap.plan import PlanStore
 from agentmap.server import CellCache, Dashboard, make_server
+from agentmap.status import StatusStore
 from agentmap.t3 import T3Reader
 
 DEFAULT_DB = Path.home() / ".t3" / "userdata" / "statev2.sqlite"
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     # place before its first scan: a path that it drops then stays dropped.
     cells.refresh()
     reader = T3Reader(args.t3_db, root, timedelta(hours=args.hours), anchors=cells.anchors)
-    store = PlanStore(root / ".agentmap" / "plan.jsonl")
+    store = StatusStore(root / ".agentmap" / "status.jsonl")
     # Codex threads share one process and send no thread header. The finder
     # names their thread from T3 Code's record of the call.
     find_caller = CallerFinder(

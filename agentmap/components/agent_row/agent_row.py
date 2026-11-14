@@ -2,14 +2,14 @@ from datetime import datetime, timedelta
 
 from agentmap.components._template import render
 from agentmap.components.view import STATE_CLASS, age_class, element_id, format_age, summary
-from agentmap.plan import Plan
+from agentmap.status import Status
 from agentmap.t3 import AgentThread
 
 # An idle child thread that is quiet for longer than this shows as one line.
 COMPACT_AFTER = timedelta(minutes=10)
 
 
-def agent_row(thread: AgentThread, tag: str, hue: float, plan: Plan | None,
+def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
               kids_html: str, is_root: bool, now: datetime) -> str:
     """One thread's row in the agent tree, with its children's rows inside it.
 
@@ -18,7 +18,7 @@ def agent_row(thread: AgentThread, tag: str, hue: float, plan: Plan | None,
     and its newest thought. An idle child quiet for over 10 minutes is one line.
     """
     age = format_age(now - thread.updated_at)
-    line = summary(thread, plan)
+    line = summary(thread, status)
     meta = " · ".join(x for x in (thread.provider, thread.model) if x)
     return render("agent_row", {
         "id": element_id("t", thread.id),

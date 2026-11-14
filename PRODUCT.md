@@ -13,15 +13,15 @@ One developer who runs many Claude Code and Codex agent threads at once in T3 Co
 The developer uses the dashboard in two ways, equally often:
 
 - A glance of one or two seconds, to see whether something moved, finished, or needs an answer.
-- A short read of 10 to 30 seconds, to see what one agent is doing and how far its plan is.
+- A short read of 10 to 30 seconds, to see what one agent is doing and how far its tickets are.
 
 ## Product Purpose
 
-agentmap shows, live, what every agent thread of one project does now, where in the project it works, and which thread started which. Agents can also post their overall goal, a status line, and a two-level todo list through MCP. Success: the developer knows the state of all agents without opening their threads.
+agentmap shows, live, what every agent thread of one project does now, where in the project it works, and which thread started which. Agents can also post a status line through MCP, and the project's `tk` tickets show what the work is for. Success: the developer knows the state of all agents without opening their threads.
 
 ## Positioning
 
-agentmap joins three views of the same threads that neither Claude Code nor Codex shows together: place (a map of the project's directories), ownership (orchestrators and their subagents), and intent (the goals and todo lists that agents post themselves).
+agentmap joins three views of the same threads that neither Claude Code nor Codex shows together: place (a map of the project's directories), ownership (orchestrators and their subagents), and intent (the project's `tk` tickets, grouped by epic).
 
 ## Operating Context
 
@@ -33,9 +33,9 @@ agentmap joins three views of the same threads that neither Claude Code nor Code
 
 - Per thread: a tag (A, A1, A1.2), a title, the provider and model, and a state (working, needs you, idle, failed).
 - Also per thread: an age, the current action ("now line"), the newest thought, the first sentence of its last message, and up to 8 recently touched files.
-- Per plan: goal, status line, items with the states todo, doing, done. Items are only added and only move forward. Finished top-level items collapse to one line.
+- Per ticket group: the epic's title and counts, and its unfinished tickets with their metadata and rendered text. See `docs/plans/ticket-bar.md`.
 - The map is an ordered strip treemap of the project's directories, two levels deep, sized by lines of code.
-- The backend uses the Python 3 standard library only. The frontend is Datastar 1.0.5 and one CSS file, with no build step.
+- The backend uses the Python 3 standard library and a vendored Mustache engine. The frontend is Datastar 1.0.5 and one CSS file, with no build step.
 - The structure, information, and functionality must stay. A redesign changes how they look and read.
 
 ## Change tracking
