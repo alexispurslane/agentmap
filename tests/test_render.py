@@ -476,5 +476,41 @@ class DetailTest(unittest.TestCase):
                             r'[^>]*>.*?</li><li class="item todo"[^>]*>.*?</li></ol></li></ol>')
 
 
+class HoverLinkTest(unittest.TestCase):
+    """Hovering a dot highlights its card, and hovering a card highlights its dot.
+
+    One frontend signal, $hover, holds the tag under the pointer. Datastar
+    keeps it in the browser; the server never sees it.
+    """
+
+    def test_the_page_declares_the_hover_signal_outside_the_morphed_app(self):
+        page = render_page('<main id="app"></main>')
+        body = re.search(r"<body[^>]*>", page).group(0)
+        self.assertIn("data-signals:hover=\"''\"", body)
+
+    def test_a_dot_sets_the_signal_to_its_tag_while_the_pointer_is_on_it(self):
+        html = app([thread("r", created=90), thread("k", "r", touched=["docs/a"])])
+        dot = re.search(r'<span[^>]*class="dot[^"]*"[^>]*>A1<', html).group(0)
+        self.assertIn('data-on:mouseenter="$hover = \'A1\'"', dot)
+        self.assertIn('data-on:mouseleave="$hover = \'\'"', dot)
+
+    def test_a_card_sets_the_signal_to_its_own_tag_not_its_parents(self):
+        html = app([thread("r", created=90), thread("k", "r")])
+        opening = card(html, "A1").split(">")[0]
+        self.assertIn('data-on:mouseover__stop="$hover = \'A1\'"', opening)
+        self.assertIn('data-on:mouseleave="$hover = \'\'"', opening)
+
+    def test_a_dot_and_its_card_light_up_on_the_same_signal_value(self):
+        html = app([thread("r", touched=["docs/a"])])
+        dot = re.search(r'<span[^>]*class="dot[^"]*"[^>]*>A<', html).group(0)
+        opening = card(html, "A").split(">")[0]
+        for element in (dot, opening):
+            self.assertIn('data-class:hl="$hover == \'A\'"', element)
+
+    def test_the_highlight_class_has_a_style_for_dots_and_cards(self):
+        self.assertIn(".dot.hl", CSS)
+        self.assertIn(".card.hl", CSS)
+
+
 if __name__ == "__main__":
     unittest.main()

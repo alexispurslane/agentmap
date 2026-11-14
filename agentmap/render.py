@@ -55,7 +55,10 @@ def render_page(app_html: str) -> Safe:
         t'<link rel="stylesheet" href="/static/app.css">'
         t'<script type="module" src="/static/datastar.js"></script>'
         t"</head>\n"
-        t"<body data-init=\"@get('/stream', {{openWhenHidden: true}})\">\n"
+        # $hover lives on <body>, outside the morphed #app, so a server
+        # update does not reset it.
+        t"<body data-signals:hover=\"''\" "
+        t"data-init=\"@get('/stream', {{openWhenHidden: true}})\">\n"
         t"{Safe(app_html)}\n"
         t"</body></html>\n"
     )
@@ -151,9 +154,10 @@ def _map(forest: _Forest, cells: list[Cell]) -> Safe:
                 continue
             if not seen:
                 # The newest located path holds the thread's dot.
+                tag = forest.tag[t.id]
                 pins[cell.key].append(html(
-                    t'<span class="dot {STATE_CLASS[t.state]}" style="--hue:{hue}">'
-                    t'{forest.tag[t.id]}</span>'))
+                    t'<span {_hover("mouseenter", tag)} '
+                    t'class="dot {STATE_CLASS[t.state]}" style="--hue:{hue}">{tag}</span>'))
                 if t.state in ("working", "needs_you"):
                     busy_cells.add(cell.key)
             else:
@@ -173,6 +177,17 @@ def _cell(c: Cell, busy: bool, pins: list[Safe], trails: list[Safe]) -> Safe:
         t'<span class="label">{_label(c)}</span>'
         t'<div class="pins">{pins}{trails}</div>'
         t"</div><!--/cell-->")
+
+
+def _hover(enter_event: str, tag: str) -> Safe:
+    """Datastar attributes that link a thread's dot and card through $hover.
+
+    The element sets the frontend signal $hover to its tag while the pointer
+    is on it, and it has the class `hl` while $hover holds its tag.
+    """
+    return html(t'data-on:{enter_event}="$hover = \'{tag}\'" '
+                t'data-on:mouseleave="$hover = \'\'" '
+                t'data-class:hl="$hover == \'{tag}\'"')
 
 
 def _label(cell: Cell) -> str:
@@ -225,8 +240,11 @@ def _card(t: AgentThread, forest: _Forest, plans: dict[str, Plan], now: datetime
     kids = [_card(k, forest, plans, now, is_root=False) for k in forest.children[t.id]]
     if kids:
         body.append(html(t'<div class="kids">{kids}</div>'))
+    # mouseover bubbles up from a child card; __stop keeps the parent card
+    # from taking $hover back while the pointer is on the child.
     return html(t'<article class="{cls}" id="{_id("t", t.id)}" data-tag="{tag}" '
-                t'style="--hue:{forest.hue[t.id]}">{head}{body}</article>')
+                t'style="--hue:{forest.hue[t.id]}" {_hover("mouseover__stop", tag)}>'
+                t'{head}{body}</article>')
 
 
 def _plan(thread_id: str, plan: Plan) -> Safe:
