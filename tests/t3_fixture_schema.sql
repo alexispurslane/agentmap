@@ -25,7 +25,8 @@ CREATE TABLE orchestration_v2_projection_runs (
   run_id TEXT PRIMARY KEY,
   thread_id TEXT NOT NULL,
   ordinal INTEGER NOT NULL,
-  status TEXT NOT NULL
+  status TEXT NOT NULL,
+  completed_at TEXT
 );
 CREATE UNIQUE INDEX orchestration_v2_projection_runs_thread_ordinal_idx
   ON orchestration_v2_projection_runs(thread_id, ordinal);
@@ -42,6 +43,8 @@ CREATE TABLE orchestration_v2_projection_turn_items (
 );
 CREATE INDEX orchestration_v2_projection_turn_items_thread_ordinal_idx
   ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id);
+CREATE INDEX orchestration_v2_projection_turn_items_run_ordinal_idx
+  ON orchestration_v2_projection_turn_items(run_id, ordinal);
 CREATE INDEX orchestration_v2_projection_turn_items_node_ordinal_idx
   ON orchestration_v2_projection_turn_items(node_id, ordinal);
 CREATE INDEX orchestration_v2_projection_turn_items_active_ordinal_idx

@@ -13,7 +13,8 @@ import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from agentmap.t3 import AgentThread, T3Reader
+from agentmap.events import Event
+from agentmap.t3 import AgentThread, T3Reader, Touch
 
 SCHEMA = (pathlib.Path(__file__).parent / "t3_fixture_schema.sql").read_text()
 
@@ -70,17 +71,22 @@ class Fixture:
             "UPDATE orchestration_v2_projection_threads SET updated_at = ? WHERE thread_id = ?",
             (stamp(updated), thread_id))
 
-    def run(self, thread_id, ordinal, status):
+    def run(self, thread_id, ordinal, status, completed=None):
+        """A run; `completed` is how many minutes before NOW it completed, or None."""
         run_id = f"run:{thread_id}:{ordinal}"
-        self.db.execute("INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?)",
-                        (run_id, thread_id, ordinal, status))
+        self.db.execute(
+            "INSERT INTO orchestration_v2_projection_runs (run_id, thread_id, ordinal, status,"
+            " completed_at) VALUES (?, ?, ?, ?, ?)",
+            (run_id, thread_id, ordinal, status,
+             stamp(completed) if completed is not None else None))
         return run_id
 
     def item(self, thread_id, type_, status="completed", run_id=None, node_id=None,
-             ordinal=None, **payload):
+             ordinal=None, started=1.0, **payload):
+        """A turn item that started `started` minutes before NOW."""
         self._ordinal += 1
         item_id = f"item-{self._ordinal}"
-        payload = {"type": type_, "status": status, **payload}
+        payload = {"type": type_, "status": status, "startedAt": stamp(started), **payload}
         self.db.execute(
             "INSERT INTO orchestration_v2_projection_turn_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (item_id, thread_id, run_id, node_id, ordinal or self._ordinal, type_, status,
@@ -100,6 +106,10 @@ class Fixture:
 
 def by_id(threads):
     return {t.id: t for t in threads}
+
+
+def paths(touched):
+    return tuple(t.path for t in touched)
 
 
 class SnapshotSelection(unittest.TestCase):
@@ -545,6 +555,32 @@ class ThoughtAndLastSaid(unittest.TestCase):
         self.assertIsNone(thread.thought)
         self.assertIsNone(thread.last_said)
 
+    def test_thought_at_is_the_start_time_of_the_thinking_item_the_thought_came_from(self):
+        self.f.item("t", "reasoning", started=9, text="Old idea.")
+        self.f.item("t", "reasoning", started=4, text="New idea.")
+        self.f.item("t", "reasoning", started=2, text="  ")
+        self.assertEqual(self.thread().thought_at, NOW - timedelta(minutes=4))
+
+    def test_said_at_is_the_start_time_of_the_message_last_said_came_from(self):
+        self.f.item("t", "assistant_message", started=7, text="Old reply.")
+        self.f.item("t", "assistant_message", started=3, text="New reply.")
+        self.f.item("t", "reasoning", started=1, text="A later thought.")
+        thread = self.thread()
+        self.assertEqual(thread.said_at, NOW - timedelta(minutes=3))
+        self.assertEqual(thread.said_at.utcoffset(), timedelta(0))
+
+    def test_without_thinking_or_messages_both_times_are_none(self):
+        thread = self.thread()
+        self.assertIsNone(thread.thought_at)
+        self.assertIsNone(thread.said_at)
+
+    def test_a_text_that_gives_no_sentence_gives_no_time(self):
+        self.f.item("t", "reasoning", text="<note>only a tag block</note>")
+        self.f.item("t", "assistant_message", text="<note>only a tag block</note>")
+        thread = self.thread()
+        self.assertIsNone(thread.thought_at)
+        self.assertIsNone(thread.said_at)
+
 
 class TouchedPaths(unittest.TestCase):
     def setUp(self):
@@ -552,7 +588,7 @@ class TouchedPaths(unittest.TestCase):
         self.f.thread("t", updated=1, worktree="/wt/t1")
 
     def touched(self):
-        return by_id(self.f.reader(self).snapshot(NOW))["t"].touched
+        return paths(by_id(self.f.reader(self).snapshot(NOW))["t"].touched)
 
     def test_paths_in_the_project_root_become_relative_newest_first_without_repeats(self):
         self.f.item("t", "file_change", fileName=ROOT + "/src/a.rs")
@@ -594,6 +630,16 @@ class TouchedPaths(unittest.TestCase):
     def test_a_claude_agent_worktree_inside_the_root_is_taken_off_the_path(self):
         self.f.item("t", "file_change", fileName=ROOT + "/.claude/worktrees/agent-a1/agentmap/t3.py")
         self.assertEqual(self.touched(), ("agentmap/t3.py",))
+
+    def test_a_touched_path_carries_the_start_time_of_the_newest_item_that_touched_it(self):
+        self.f.item("t", "file_change", started=30, fileName=ROOT + "/src/a.rs")
+        self.f.item("t", "file_change", started=20, fileName=ROOT + "/src/b.rs")
+        self.f.item("t", "dynamic_tool", started=10, toolName="Read",
+                    input={"file_path": ROOT + "/src/a.rs"})
+        touched = by_id(self.f.reader(self).snapshot(NOW))["t"].touched
+        self.assertEqual(touched, (Touch("src/a.rs", NOW - timedelta(minutes=10)),
+                                   Touch("src/b.rs", NOW - timedelta(minutes=20))))
+        self.assertEqual(touched[0].at.utcoffset(), timedelta(0))
 
     def test_dots_in_a_path_are_resolved_before_the_root_check(self):
         self.f.item("t", "file_change", fileName=ROOT + "/src/../lib/x.rs")
@@ -642,20 +688,20 @@ class ChangeDetection(unittest.TestCase):
         for i in range(6):
             self.f.item("t", "file_change", fileName=f"{ROOT}/old{i}.rs")
         self.f.touch("t", updated=4)
-        self.assertEqual(by_id(reader.snapshot(NOW))["t"].touched,
+        self.assertEqual(paths(by_id(reader.snapshot(NOW))["t"].touched),
                          tuple(f"old{i}.rs" for i in range(5, -1, -1)))
         self.f.item("t", "file_change", fileName=f"{ROOT}/old0.rs")
         self.f.item("t", "dynamic_tool", toolName="Read", input={"file_path": f"{ROOT}/new.rs"})
         self.f.item("t", "dynamic_tool", toolName="Skill", input={})
         self.f.item("t", "file_change", fileName=f"{ROOT}/old0.rs")
         self.f.touch("t", updated=3)
-        self.assertEqual(by_id(reader.snapshot(NOW))["t"].touched,
+        self.assertEqual(paths(by_id(reader.snapshot(NOW))["t"].touched),
                          ("old0.rs", "new.rs", "old5.rs", "old4.rs", "old3.rs", "old2.rs",
                           "old1.rs"))
         for i in range(9):
             self.f.item("t", "file_change", fileName=f"{ROOT}/n{i}.rs")
         self.f.touch("t", updated=2)
-        self.assertEqual(by_id(reader.snapshot(NOW))["t"].touched,
+        self.assertEqual(paths(by_id(reader.snapshot(NOW))["t"].touched),
                          tuple(f"n{i}.rs" for i in range(8, 0, -1)))
 
     def test_the_touched_scan_reads_only_items_newer_than_those_it_has_seen(self):
@@ -668,13 +714,276 @@ class ChangeDetection(unittest.TestCase):
         self.f.item("t", "file_change", fileName=f"{ROOT}/below.rs", ordinal=50)
         self.f.item("t", "file_change", fileName=f"{ROOT}/above.rs", ordinal=200)
         self.f.touch("t", updated=3)
-        self.assertEqual(by_id(reader.snapshot(NOW))["t"].touched, ("above.rs", "seen.rs"))
+        self.assertEqual(paths(by_id(reader.snapshot(NOW))["t"].touched), ("above.rs", "seen.rs"))
+
+    def test_a_path_touched_again_after_a_snapshot_carries_its_new_time(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "file_change", started=30, fileName=f"{ROOT}/a.rs")
+        self.f.item("t", "file_change", started=20, fileName=f"{ROOT}/b.rs")
+        self.f.touch("t", updated=4)
+        reader.snapshot(NOW)
+        self.f.item("t", "file_change", started=2, fileName=f"{ROOT}/a.rs")
+        self.f.touch("t", updated=2)
+        self.assertEqual(by_id(reader.snapshot(NOW))["t"].touched,
+                         (Touch("a.rs", NOW - timedelta(minutes=2)),
+                          Touch("b.rs", NOW - timedelta(minutes=20))))
 
     def test_a_new_run_is_seen_even_when_updated_at_did_not_move(self):
         reader = self.f.reader(self)
         self.assertEqual(by_id(reader.snapshot(NOW))["t"].state, "working")
         self.f.run("t", 2, "failed")
         self.assertEqual(by_id(reader.snapshot(NOW))["t"].state, "failed")
+
+
+def minutes(n):
+    """The time `n` minutes before NOW."""
+    return NOW - timedelta(minutes=n)
+
+
+def stamp_at(t):
+    """The T3 Code text form of the time `t`."""
+    return t.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class Events(unittest.TestCase):
+    """events() lists what the project's threads did inside the window, newest first."""
+
+    def setUp(self):
+        self.f = Fixture(self)
+        self.f.thread("t", title="Cull lights", created=200, updated=1, worktree="/wt/t1")
+
+    def events(self, reader=None, now=NOW):
+        return (reader or self.f.reader(self)).events(now)
+
+    def kinds(self, kind, reader=None):
+        return [e for e in self.events(reader) if e.kind == kind]
+
+    def test_a_thread_created_inside_the_window_gives_a_started_event_with_its_title(self):
+        self.f.thread("new", title="Fix the cull", created=50, updated=1)
+        self.assertEqual(self.kinds("started"),
+                         [Event(minutes(50), "new", "started", "Fix the cull")])
+
+    def test_a_file_change_gives_an_edits_event_at_its_start_with_its_relative_path(self):
+        self.f.item("t", "file_change", started=12, fileName=ROOT + "/src/a.rs")
+        self.f.item("t", "file_change", started=8, fileName="/wt/t1/src/b.rs")
+        self.assertEqual(self.kinds("edits"), [Event(minutes(8), "t", "edits", "src/b.rs"),
+                                               Event(minutes(12), "t", "edits", "src/a.rs")])
+
+    def test_a_file_change_outside_both_roots_or_without_a_path_gives_no_event(self):
+        self.f.item("t", "file_change", fileName="/tmp/scratch.py")
+        self.f.item("t", "file_change")
+        self.assertEqual(self.kinds("edits"), [])
+
+    def test_reading_a_file_or_running_a_command_gives_no_event(self):
+        self.f.item("t", "dynamic_tool", toolName="Read", input={"file_path": ROOT + "/a.py"})
+        self.f.item("t", "command_execution", input="ls")
+        self.assertEqual(self.events(), [])
+
+    def test_a_question_asks_with_the_first_sentence_of_its_first_question(self):
+        self.f.item("t", "user_input_request", started=5, questions=[
+            {"header": "Direction", "question": "Which mockup wins? Pick one.", "options": []},
+            {"header": "Other", "question": "Second question?", "options": []}])
+        self.assertEqual(self.events(), [Event(minutes(5), "t", "asks", "Which mockup wins?")])
+
+    def test_an_approval_request_asks_with_the_first_sentence_of_its_prompt(self):
+        self.f.item("t", "approval_request", "waiting", requestKind="command",
+                    prompt="git commit -qm x\ngit log", reason="It writes.")
+        self.assertEqual([e.text for e in self.kinds("asks")], ["git commit -qm x"])
+
+    def test_a_secret_request_asks_with_its_label(self):
+        self.f.item("t", "secret_request", label="New Runpod API key. Paste it.",
+                    reason="The old key expired.")
+        self.assertEqual([e.text for e in self.kinds("asks")], ["New Runpod API key."])
+
+    def test_a_request_without_question_text_asks_with_empty_text(self):
+        self.f.item("t", "user_input_request", questions=[])
+        self.f.item("t", "user_input_request", questions=[{"header": "No question"}])
+        self.f.item("t", "user_input_request")
+        self.f.item("t", "approval_request", prompt=None)
+        self.f.item("t", "secret_request", label="  ")
+        self.assertEqual([e.text for e in self.kinds("asks")], [""] * 5)
+
+    def test_a_completed_run_finishes_at_its_completion_with_its_newest_message(self):
+        run = self.f.run("t", 1, "completed", completed=6)
+        self.f.item("t", "assistant_message", run_id=run, text="Early words.")
+        self.f.item("t", "assistant_message", run_id=run,
+                    text="<tools-used>Edit</tools-used>The cull is done. Tests pass.")
+        self.f.item("t", "assistant_message", run_id=run, text=" ")
+        self.assertEqual(self.kinds("finished"),
+                         [Event(minutes(6), "t", "finished", "The cull is done.")])
+
+    def test_a_failed_run_gives_a_failed_event(self):
+        run = self.f.run("t", 1, "failed", completed=6)
+        self.f.item("t", "assistant_message", run_id=run, text="I hit a wall.")
+        self.assertEqual(self.kinds("failed"),
+                         [Event(minutes(6), "t", "failed", "I hit a wall.")])
+
+    def test_a_run_without_a_message_finishes_with_empty_text(self):
+        self.f.run("t", 1, "completed", completed=6)
+        self.f.item("t", "assistant_message", text="A message of no run.")
+        self.assertEqual([e.text for e in self.kinds("finished")], [""])
+
+    def test_the_finished_text_comes_from_that_run_not_a_later_one(self):
+        first = self.f.run("t", 1, "completed", completed=20)
+        self.f.item("t", "assistant_message", run_id=first, text="First run done.")
+        second = self.f.run("t", 2, "running")
+        self.f.item("t", "assistant_message", run_id=second, text="Second run talking.")
+        self.assertEqual([e.text for e in self.kinds("finished")], ["First run done."])
+
+    def test_running_interrupted_or_cancelled_runs_give_no_end_event(self):
+        self.f.run("t", 1, "interrupted", completed=9)
+        self.f.run("t", 2, "cancelled", completed=8)
+        self.f.run("t", 3, "running")
+        self.assertEqual(self.events(), [])
+
+    def test_a_native_subagent_finishes_when_its_parent_subagent_item_completes(self):
+        self.f.thread("sub", parent="t", forked_from="node:task-1", created=300, updated=2)
+        self.f.item("t", "subagent", "completed", node_id="node:task-1", started=30,
+                    completedAt=stamp(4))
+        self.f.item("sub", "assistant_message", text="Old reply.")
+        self.f.item("sub", "assistant_message", text="Reader built. All green.")
+        self.assertEqual(self.kinds("finished"),
+                         [Event(minutes(4), "sub", "finished", "Reader built.")])
+
+    def test_a_native_subagent_whose_item_failed_gives_a_failed_event(self):
+        self.f.thread("sub", parent="t", forked_from="node:task-1", created=300, updated=2)
+        self.f.item("t", "subagent", "failed", node_id="node:task-1", completedAt=stamp(4))
+        self.assertEqual(self.kinds("failed"), [Event(minutes(4), "sub", "failed", "")])
+
+    def test_a_native_subagent_still_running_or_without_an_end_time_gives_no_end_event(self):
+        self.f.thread("sub", parent="t", forked_from="node:a", created=300, updated=2)
+        self.f.thread("sub2", parent="t", forked_from="node:b", created=300, updated=2)
+        self.f.thread("sub3", parent="t", forked_from="node:gone", created=300, updated=2)
+        self.f.item("t", "subagent", "running", node_id="node:a")
+        self.f.item("t", "subagent", "completed", node_id="node:b")
+        self.assertEqual(self.events(), [])
+
+    def test_a_native_subagent_end_shows_without_a_change_to_the_subagent_thread(self):
+        self.f.thread("sub", parent="t", forked_from="node:task-1", created=300, updated=2)
+        item = self.f.item("t", "subagent", "running", node_id="node:task-1")
+        reader = self.f.reader(self)
+        self.assertEqual(self.kinds("finished", reader), [])
+        self.f.set_item_status(item, "completed")
+        self.f.db.execute(
+            "UPDATE orchestration_v2_projection_turn_items"
+            " SET payload_json = json_set(payload_json, '$.completedAt', ?)"
+            " WHERE turn_item_id = ?", (stamp(1), item))
+        self.assertEqual(self.kinds("finished", reader),
+                         [Event(minutes(1), "sub", "finished", "")])
+
+    def test_a_thread_with_a_run_is_not_ended_by_a_subagent_item(self):
+        self.f.thread("sub", parent="t", forked_from="node:task-1", created=300, updated=2)
+        self.f.run("sub", 1, "running")
+        self.f.item("t", "subagent", "completed", node_id="node:task-1", completedAt=stamp(4))
+        self.assertEqual(self.events(), [])
+
+    def test_events_before_the_window_or_after_now_are_left_out(self):
+        self.f.item("t", "file_change", started=3 * 60 + 1, fileName=ROOT + "/old.rs")
+        self.f.item("t", "file_change", started=3 * 60, fileName=ROOT + "/edge.rs")
+        self.f.item("t", "file_change", started=-1, fileName=ROOT + "/future.rs")
+        self.f.run("t", 1, "completed", completed=3 * 60 + 1)
+        self.f.run("t", 2, "completed", completed=-1)
+        self.assertEqual(self.events(), [Event(minutes(3 * 60), "t", "edits", "edge.rs")])
+
+    def test_events_hold_only_the_threads_of_the_snapshot(self):
+        self.f.project("other", "/work/other")
+        self.f.thread("theirs", project_id="other", created=10, updated=1)
+        self.f.thread("stale", created=10, updated=4 * 60)
+        self.f.thread("archived", created=10, updated=1, archived_at=stamp(1))
+        self.f.item("theirs", "file_change", fileName="/work/other/x.rs")
+        self.assertEqual(self.events(), [])
+
+    def test_an_ancestor_outside_the_window_still_gives_its_events_inside_the_window(self):
+        self.f.thread("old-root", created=5, updated=5 * 60)
+        self.f.thread("kid", parent="old-root", created=300, updated=1)
+        self.assertEqual(self.events(),
+                         [Event(minutes(5), "old-root", "started", "Title of old-root")])
+
+    def test_events_come_newest_first_from_all_threads(self):
+        self.f.thread("u", title="Other", created=15, updated=1)
+        self.f.item("t", "file_change", started=20, fileName=ROOT + "/a.rs")
+        self.f.item("u", "approval_request", started=10, prompt="May I?")
+        self.f.run("t", 1, "completed", completed=5)
+        self.assertEqual([(e.at, e.thread_id, e.kind) for e in self.events()], [
+            (minutes(5), "t", "finished"), (minutes(10), "u", "asks"),
+            (minutes(15), "u", "started"), (minutes(20), "t", "edits")])
+
+    def test_events_at_the_same_time_come_in_a_fixed_order(self):
+        self.f.thread("u", created=200, updated=1)
+        for thread in ("t", "u"):
+            self.f.item(thread, "file_change", started=5, fileName=ROOT + "/b.rs")
+            self.f.item(thread, "file_change", started=5, fileName=ROOT + "/a.rs")
+            self.f.item(thread, "secret_request", started=5, label="Key.")
+        self.assertEqual([(e.thread_id, e.kind, e.text) for e in self.events()], [
+            ("u", "asks", "Key."), ("u", "edits", "b.rs"), ("u", "edits", "a.rs"),
+            ("t", "asks", "Key."), ("t", "edits", "b.rs"), ("t", "edits", "a.rs")])
+
+    def test_at_most_80_events_are_given(self):
+        for i in range(90):
+            self.f.item("t", "file_change", started=100 - i, fileName=f"{ROOT}/f{i}.rs")
+        events = self.events()
+        self.assertEqual(len(events), 80)
+        self.assertEqual((events[0].text, events[-1].text), ("f89.rs", "f10.rs"))
+
+    def test_a_naive_now_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "^now must be timezone-aware$"):
+            self.f.reader(self).events(datetime(2026, 11, 14, 15, 0))
+
+    def test_a_new_item_shows_once_the_thread_updated_at_moves(self):
+        reader = self.f.reader(self)
+        self.assertEqual(self.events(reader), [])
+        self.f.item("t", "file_change", started=1, fileName=ROOT + "/a.rs")
+        self.assertEqual(self.events(reader), [])
+        self.f.touch("t", updated=0.5)
+        self.assertEqual([e.text for e in self.events(reader)], ["a.rs"])
+
+    def test_a_new_run_end_shows_once_the_thread_updated_at_moves(self):
+        reader = self.f.reader(self)
+        self.events(reader)
+        self.f.run("t", 1, "completed", completed=1)
+        self.f.touch("t", updated=0.5)
+        self.assertEqual([e.kind for e in self.events(reader)], ["finished"])
+
+    def test_the_item_scan_keeps_what_it_found_and_reads_only_newer_items(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "file_change", started=9, fileName=f"{ROOT}/seen.rs", ordinal=100)
+        self.f.touch("t", updated=0.8)
+        self.events(reader)
+        self.f.item("t", "file_change", started=8, fileName=f"{ROOT}/below.rs", ordinal=50)
+        self.f.item("t", "file_change", started=7, fileName=f"{ROOT}/above.rs", ordinal=200)
+        self.f.touch("t", updated=0.5)
+        self.assertEqual([e.text for e in self.events(reader)], ["above.rs", "seen.rs"])
+
+    def test_an_event_exactly_at_the_window_start_stays_after_the_thread_changes(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "file_change", started=3 * 60, fileName=f"{ROOT}/edge.rs")
+        self.events(reader)
+        self.f.touch("t", updated=0.5)
+        self.assertEqual([e.text for e in self.events(reader)], ["edge.rs"])
+
+    def test_an_item_from_before_the_window_does_not_end_the_scan(self):
+        # The scan does not rely on start times that grow with the ordinal.
+        self.f.item("t", "file_change", started=10, fileName=f"{ROOT}/inside.rs", ordinal=100)
+        self.f.item("t", "file_change", started=5 * 60, fileName=f"{ROOT}/before.rs", ordinal=200)
+        self.assertEqual([e.text for e in self.events()], ["inside.rs"])
+
+    def test_an_event_drops_out_once_the_window_moves_past_it(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "file_change", started=60, fileName=f"{ROOT}/early.rs")
+        self.f.item("t", "file_change", started=10, fileName=f"{ROOT}/late.rs")
+        self.assertEqual(len(self.events(reader)), 2)
+        later = NOW + timedelta(hours=2, minutes=30)
+        self.f.item("t", "file_change", started=-150, fileName=f"{ROOT}/new.rs")
+        self.f.db.execute("UPDATE orchestration_v2_projection_threads SET updated_at = ?",
+                          (stamp_at(later),))
+        self.assertEqual([e.text for e in self.events(reader, later)], ["new.rs", "late.rs"])
+
+    def test_a_thread_that_left_the_window_is_forgotten(self):
+        reader = self.f.reader(self)
+        self.f.item("t", "file_change", started=10, fileName=f"{ROOT}/a.rs")
+        self.events(reader)
+        self.assertEqual(self.events(reader, NOW + timedelta(hours=4)), [])
+        self.assertEqual(reader._logs, {})
 
 
 class ThreadProject(unittest.TestCase):
@@ -788,7 +1097,7 @@ class FindToolCalls(unittest.TestCase):
 
     def test_a_call_without_a_start_time_is_skipped(self):
         self.f.item("codex-t", "dynamic_tool", status="running", toolName="agentmap.get_plan",
-                    input={})
+                    input={}, startedAt=None)
         self.assertEqual(self.find("get_plan", {}), [])
 
 

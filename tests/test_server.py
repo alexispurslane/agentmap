@@ -12,7 +12,7 @@ from pathlib import Path
 
 from agentmap.plan import PlanStore
 from agentmap.server import CellCache, Dashboard, make_server, sse_patch
-from agentmap.t3 import AgentThread
+from agentmap.t3 import AgentThread, Touch
 from agentmap.treemap import Cell
 
 T0 = datetime(2026, 11, 14, 15, 0, tzinfo=timezone.utc)
@@ -22,7 +22,8 @@ CELLS = [Cell("src", "src", 1, 0, 0, 1080, 600, 10)]
 def thread(id, title="Work", touched=()):
     return AgentThread(id=id, parent_id=None, title=title, provider="claude", model=None,
                        state="working", created_at=T0, updated_at=T0, now=None, thought=None,
-                       last_said=None, touched=tuple(touched))
+                       last_said=None, thought_at=None, said_at=None,
+                       touched=tuple(Touch(path, T0) for path in touched))
 
 
 class FakeReader:

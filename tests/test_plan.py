@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from agentmap import plan as plan_module
+from agentmap.events import Event
 from agentmap.plan import Item, Plan, PlanError, PlanStore
 
 T1 = "thread-one"
@@ -260,7 +261,7 @@ class AddingItems(StoreTestCase):
         plan = self.store.plan(T1)
         self.assertEqual([c.text for c in plan.items[0].children], ["a1", "a2"])
         self.assertEqual(plan.items[1].children, ())
-        self.assertEqual(plan.items[2].children[0], Item("3.1", "c1", "todo", ()))
+        self.assertEqual(plan.items[2].children[0], Item("3.1", "c1", "todo", (), mock.ANY))
 
     def test_children_given_with_a_parent_are_appended_to_that_item(self):
         self.store.add_items(T1, ["a", "b"], children=[["a1"], []])
@@ -268,7 +269,7 @@ class AddingItems(StoreTestCase):
         self.assertEqual(self.store.add_items(T1, ["b1"], parent="2"), ["2.1"])
         first = self.store.plan(T1).items[0]
         self.assertEqual(first.text, "a")
-        self.assertEqual(first.children[2], Item("1.3", "a3", "todo", ()))
+        self.assertEqual(first.children[2], Item("1.3", "a3", "todo", (), mock.ANY))
         self.assertEqual(
             self.states(),
             [("1", "todo"), ("1.1", "todo"), ("1.2", "todo"), ("1.3", "todo"),
@@ -419,7 +420,7 @@ class MarkingItems(StoreTestCase):
         plan = self.store.plan(T1)
         self.assertEqual(plan.items[0].text, "a")
         self.assertEqual(plan.items[0].children[0].text, "a1")
-        self.assertEqual(plan.items[1], Item("2", "b", "todo", ()))
+        self.assertEqual(plan.items[1], Item("2", "b", "todo", (), mock.ANY))
 
 
 class DerivedParentState(StoreTestCase):
@@ -635,7 +636,7 @@ class Invariants(StoreTestCase):
     def test_a_gap_in_child_ids_breaks_invariant_1(self):
         self.fill()
         first = self.store.plan(T1).items[0]
-        broken = Item("1", "a", "todo", (Item("1.2", "a2", "todo", ()),))
+        broken = Item("1", "a", "todo", (Item("1.2", "a2", "todo", (), at(0)),), at(0))
         self.tamper(T1, items=(broken,) + self.store.plan(T1).items[1:])
         with self.assertRaisesRegex(AssertionError, "child ids of item 1 "):
             self.store.check_invariants()
@@ -643,15 +644,15 @@ class Invariants(StoreTestCase):
 
     def test_a_third_level_breaks_invariant_2(self):
         self.fill()
-        deep = Item("1.1", "a1", "todo", (Item("1.1.1", "x", "todo", ()),))
-        broken = Item("1", "a", "todo", (deep,))
+        deep = Item("1.1", "a1", "todo", (Item("1.1.1", "x", "todo", (), at(0)),), at(0))
+        broken = Item("1", "a", "todo", (deep,), at(0))
         self.tamper(T1, items=(broken,) + self.store.plan(T1).items[1:])
         with self.assertRaisesRegex(AssertionError, "1.1 has children: deeper than two"):
             self.store.check_invariants()
 
     def test_an_unknown_leaf_state_breaks_invariant_3(self):
         self.fill()
-        broken = Item("2", "b", "todo", (Item("2.1", "b1", "busy", ()),))
+        broken = Item("2", "b", "todo", (Item("2.1", "b1", "busy", (), at(0)),), at(0))
         items = self.store.plan(T1).items
         self.tamper(T1, items=(items[0], broken, items[2]))
         with self.assertRaisesRegex(AssertionError, "2.1 has leaf state 'busy'"):
@@ -660,14 +661,14 @@ class Invariants(StoreTestCase):
     def test_an_unknown_state_on_a_top_level_leaf_breaks_invariant_3(self):
         self.fill()
         items = self.store.plan(T1).items
-        self.tamper(T1, items=(items[0], items[1], items[2], Item("4", "d", "later", ())))
+        self.tamper(T1, items=(items[0], items[1], items[2], Item("4", "d", "later", (), at(0))))
         with self.assertRaisesRegex(AssertionError, "item 4 has leaf state 'later'"):
             self.store.check_invariants()
 
     def test_a_parent_state_that_differs_from_its_children_breaks_invariant_4(self):
         self.fill()
         items = self.store.plan(T1).items
-        broken = Item("3", "c", "doing", items[2].children)
+        broken = Item("3", "c", "doing", items[2].children, at(0))
         self.tamper(T1, items=(items[0], items[1], broken))
         with self.assertRaisesRegex(AssertionError, "item 3 has state 'doing', but its derived"):
             self.store.check_invariants()
@@ -675,7 +676,8 @@ class Invariants(StoreTestCase):
     def test_memory_that_differs_from_the_log_breaks_invariant_5(self):
         self.fill()
         self.tamper(T1, goal="Changed behind the log")
-        with self.assertRaisesRegex(AssertionError, "replay"):
+        with self.assertRaisesRegex(
+                AssertionError, "^a fresh replay of the log differs from the memory$"):
             self.store.check_invariants()
 
     def test_invariants_are_checked_even_when_assertions_are_compiled_out(self):
@@ -686,7 +688,7 @@ class Invariants(StoreTestCase):
             "from agentmap.plan import PlanStore, Plan\n"
             "s = PlanStore(pathlib.Path(sys.argv[1]))\n"
             "s.set_goal('t', 'g')\n"
-            "s._plans['t'] = Plan('other', None, (), s._plans['t'].updated_at)\n"
+            "s._plans['t'] = Plan('other', None, (), s._plans['t'].updated_at, None)\n"
             "try:\n"
             "    s.check_invariants()\n"
             "except AssertionError:\n"
@@ -698,6 +700,198 @@ class Invariants(StoreTestCase):
             cwd=repo, capture_output=True, text=True, check=True,
         )
         self.assertEqual(out.stdout.strip(), "caught")
+
+
+class ChangeTimes(StoreTestCase):
+    """An item's changed_at is the log time of its creation or its latest state change."""
+
+    def step(self, second, call, *args, **kwargs):
+        with mock.patch.object(plan_module, "_now", return_value=at(second)):
+            return call(*args, **kwargs)
+
+    def item(self, item_id, thread=T1):
+        top = next(i for i in self.store.plan(thread).items if i.id == item_id.split(".")[0])
+        return top if "." not in item_id else next(k for k in top.children if k.id == item_id)
+
+    def test_a_new_item_changed_at_is_the_time_it_was_added(self):
+        self.step(1, self.store.add_items, T1, ["a"], children=[["a1"]])
+        self.step(2, self.store.add_items, T1, ["b"])
+        self.assertEqual(self.item("1.1").changed_at, at(1))
+        self.assertEqual(self.item("2").changed_at, at(2))
+
+    def test_marking_a_leaf_moves_its_changed_at(self):
+        self.step(1, self.store.add_items, T1, ["a"])
+        self.step(5, self.store.mark, T1, "1", "doing")
+        self.assertEqual(self.item("1").changed_at, at(5))
+        self.step(9, self.store.mark, T1, "1", "done")
+        self.assertEqual(self.item("1").changed_at, at(9))
+
+    def test_a_request_for_the_current_state_keeps_changed_at(self):
+        self.step(1, self.store.add_items, T1, ["a"])
+        self.step(5, self.store.mark, T1, "1", "doing")
+        self.step(9, self.store.mark, T1, "1", "doing")
+        self.assertEqual(self.item("1").changed_at, at(5))
+
+    def test_a_change_to_one_item_keeps_the_changed_at_of_the_others(self):
+        self.step(1, self.store.add_items, T1, ["a", "b"], children=[["a1", "a2"], []])
+        self.step(5, self.store.mark, T1, "1.1", "done")
+        self.step(6, self.store.set_goal, T1, "Goal")
+        self.assertEqual(self.item("1.2").changed_at, at(1))
+        self.assertEqual(self.item("2").changed_at, at(1))
+
+    def test_a_parent_changed_at_is_the_latest_change_of_itself_or_its_children(self):
+        self.step(1, self.store.add_items, T1, ["a"], children=[["a1", "a2"]])
+        self.step(5, self.store.mark, T1, "1.2", "doing")
+        self.assertEqual(self.item("1").changed_at, at(5))
+        self.assertEqual(self.item("1.1").changed_at, at(1))
+
+    def test_adding_children_moves_the_parent_changed_at(self):
+        self.step(1, self.store.add_items, T1, ["a"])
+        self.step(7, self.store.add_items, T1, ["a1"], parent="1")
+        self.assertEqual(self.item("1").changed_at, at(7))
+        self.assertEqual(self.item("1.1").changed_at, at(7))
+
+    def test_a_child_change_logged_with_an_earlier_clock_does_not_move_its_parent_back(self):
+        self.step(1, self.store.add_items, T1, ["a"], children=[["a1", "a2"]])
+        self.step(9, self.store.mark, T1, "1.1", "doing")
+        self.step(4, self.store.mark, T1, "1.2", "doing")
+        self.assertEqual(self.item("1.2").changed_at, at(4))
+        self.assertEqual(self.item("1").changed_at, at(9))
+
+    def test_a_replay_gives_the_same_changed_at(self):
+        self.step(1, self.store.add_items, T1, ["a", "b"], children=[["a1", "a2"], []])
+        self.step(3, self.store.add_items, T1, ["b1"], parent="2")
+        self.step(5, self.store.mark, T1, "1.2", "done")
+        self.step(7, self.store.mark, T1, "2.1", "doing")
+        self.assertEqual(self.reopen().plans(), self.store.plans())
+        self.assertEqual(self.reopen().plan(T1).items[1].changed_at, at(7))
+
+
+class StatusTime(StoreTestCase):
+    def test_a_plan_without_a_status_has_no_status_time(self):
+        self.store.set_goal(T1, "Goal")
+        self.assertIsNone(self.store.plan(T1).status_at)
+
+    def test_status_at_is_the_time_of_the_latest_status(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(2)):
+            self.store.set_status(T1, "One")
+        with mock.patch.object(plan_module, "_now", return_value=at(6)):
+            self.store.set_status(T1, "Two")
+        self.assertEqual(self.store.plan(T1).status_at, at(6))
+
+    def test_other_changes_keep_status_at(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(2)):
+            self.store.set_status(T1, "Status")
+        with mock.patch.object(plan_module, "_now", return_value=at(8)):
+            self.store.set_goal(T1, "Goal")
+            self.store.add_items(T1, ["a"])
+            self.store.mark(T1, "1", "done")
+        self.assertEqual(self.store.plan(T1).status_at, at(2))
+
+    def test_a_replay_gives_the_same_status_at(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(4)):
+            self.store.set_status(T1, "Status")
+        self.assertEqual(self.reopen().plan(T1).status_at, at(4))
+
+
+class PlanEvents(StoreTestCase):
+    """events() lists what agents posted, newest first."""
+
+    def test_a_new_store_has_no_events(self):
+        self.assertEqual(self.store.events(), [])
+
+    def test_each_kind_of_change_gives_its_event_with_its_text_time_and_thread(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(1)):
+            self.store.set_goal(T1, " Cap lights ")
+        with mock.patch.object(plan_module, "_now", return_value=at(2)):
+            self.store.set_status(T1, "Profiling")
+        with mock.patch.object(plan_module, "_now", return_value=at(3)):
+            self.store.add_items(T1, ["Count"])
+        with mock.patch.object(plan_module, "_now", return_value=at(4)):
+            self.store.mark(T1, "1", "doing")
+        with mock.patch.object(plan_module, "_now", return_value=at(5)):
+            self.store.mark(T1, "1", "done")
+        self.assertEqual(self.store.events(), [
+            Event(at(5), T1, "done", "Count"),
+            Event(at(4), T1, "doing", "Count"),
+            Event(at(3), T1, "added", "Count"),
+            Event(at(2), T1, "status", "Profiling"),
+            Event(at(1), T1, "goal", "Cap lights"),
+        ])
+
+    def test_adding_items_gives_one_added_event_per_item_children_included(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(1)):
+            self.store.add_items(T1, ["a", "b"], children=[["a1", "a2"], []])
+        self.assertEqual([e.text for e in self.store.events()], ["b", "a2", "a1", "a"])
+        self.assertEqual({e.kind for e in self.store.events()}, {"added"})
+
+    def test_adding_children_under_a_parent_gives_one_added_event_per_child(self):
+        self.store.add_items(T1, ["a"])
+        self.store.add_items(T1, ["a1", "a2"], parent="1")
+        self.assertEqual([e.text for e in self.store.events()][:2], ["a2", "a1"])
+
+    def test_marking_a_child_gives_one_event_with_the_child_text_only(self):
+        self.store.add_items(T1, ["parent"], children=[["only child"]])
+        self.store.mark(T1, "1.1", "done")
+        self.assertEqual(self.store.events()[0], Event(mock.ANY, T1, "done", "only child"))
+        self.assertEqual(len(self.store.events()), 3)
+
+    def test_a_request_that_changes_nothing_gives_no_event(self):
+        self.store.add_items(T1, ["a"])
+        self.store.mark(T1, "1", "doing")
+        self.store.mark(T1, "1", "doing")
+        self.assertEqual([e.kind for e in self.store.events()], ["doing", "added"])
+
+    def test_a_rejected_request_gives_no_event(self):
+        self.store.add_items(T1, ["a"])
+        with self.assertRaises(PlanError):
+            self.store.mark(T1, "7", "done")
+        self.assertEqual(len(self.store.events()), 1)
+
+    def test_events_of_all_threads_are_merged_newest_first(self):
+        with mock.patch.object(plan_module, "_now", return_value=at(1)):
+            self.store.set_goal(T1, "One")
+        with mock.patch.object(plan_module, "_now", return_value=at(2)):
+            self.store.set_goal(T2, "Two")
+        with mock.patch.object(plan_module, "_now", return_value=at(3)):
+            self.store.set_status(T1, "Three")
+        self.assertEqual([(e.thread_id, e.text) for e in self.store.events()],
+                         [(T1, "Three"), (T2, "Two"), (T1, "One")])
+
+    def test_at_most_200_events_are_kept_newest_first(self):
+        self.store.add_items(T1, [f"item {n}" for n in range(150)])
+        self.store.add_items(T2, [f"other {n}" for n in range(60)])
+        events = self.store.events()
+        self.assertEqual(len(events), 200)
+        self.assertEqual(events[0].text, "other 59")
+        self.assertEqual(events[-1].text, "item 10")
+
+    def test_a_reopened_store_replays_the_same_events(self):
+        self.store.set_goal(T1, "Goal")
+        self.store.add_items(T1, ["a"], children=[["a1"]])
+        self.store.mark(T1, "1.1", "doing")
+        self.store.set_status(T2, "Other")
+        self.assertEqual(self.reopen().events(), self.store.events())
+
+    def test_a_logged_line_that_changes_nothing_gives_no_event_on_replay(self):
+        self.store.add_items(T1, ["a"])
+        self.store.mark(T1, "1", "doing")
+        repeat = self.log.read_text().splitlines()[-1]
+        with self.log.open("a") as f:
+            f.write(repeat + "\n")
+        self.assertEqual([e.kind for e in self.reopen().events()], ["doing", "added"])
+
+    def test_events_returns_a_copy_that_does_not_change_the_store(self):
+        self.store.set_goal(T1, "Goal")
+        self.store.events().clear()
+        self.assertEqual(len(self.store.events()), 1)
+
+    def test_events_that_differ_from_the_log_break_invariant_6(self):
+        self.store.set_goal(T1, "Goal")
+        self.store._events.append(Event(at(0), T1, "goal", "Not in the log"))
+        with self.assertRaisesRegex(
+                AssertionError, "^the events of a fresh replay of the log differ from the memory$"):
+            self.store.check_invariants()
 
 
 class Concurrency(StoreTestCase):

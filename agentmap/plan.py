@@ -13,6 +13,12 @@ Invariants, which `PlanStore.check_invariants` tests in every build:
 3. Each leaf state is one of ``todo``, ``doing``, ``done``.
 4. Each parent state equals the state derived from its children.
 5. A fresh replay of the log gives the same plans as the memory.
+6. A fresh replay of the log gives the same events as the memory.
+
+Times: every time in a plan is the `ts` of a log record, so a replay gives
+the same times. A leaf's `changed_at` is the time of its creation or of its
+latest state change. A parent's `changed_at` is the latest `changed_at` of
+itself and its children.
 """
 
 from __future__ import annotations
@@ -22,11 +28,16 @@ import json
 import pathlib
 import sys
 import threading
+from collections import deque
 from datetime import datetime, timezone
+
+from agentmap.events import Event
 
 GOAL_MAX = 500
 STATUS_MAX = 160
 ITEM_MAX = 200
+# events() gives at most this many events.
+EVENTS_MAX = 200
 
 LEAF_STATES = ("todo", "doing", "done")
 MARK_STATES = ("doing", "done")
@@ -44,6 +55,7 @@ class Item:
     text: str
     state: str
     children: tuple[Item, ...]
+    changed_at: datetime
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,6 +64,7 @@ class Plan:
     status: str | None
     items: tuple[Item, ...]
     updated_at: datetime
+    status_at: datetime | None  # The time of the latest status line, or None.
 
 
 def _now() -> datetime:
@@ -71,7 +84,7 @@ class PlanStore:
     def __init__(self, log_path: pathlib.Path):
         self._path = pathlib.Path(log_path)
         self._lock = threading.Lock()
-        self._plans: dict[str, Plan] = _replay(self._path, warn=True)
+        self._plans, self._events = _replay(self._path, warn=True)
 
     def set_goal(self, thread: str, text: str) -> None:
         self._change({"thread": thread, "op": "goal", "text": text})
@@ -98,16 +111,23 @@ class PlanStore:
         with self._lock:
             return dict(self._plans)
 
+    def events(self) -> list[Event]:
+        """The newest EVENTS_MAX events of all threads, newest first."""
+        with self._lock:
+            return list(reversed(self._events))
+
     def check_invariants(self) -> None:
         """Raise AssertionError when an invariant of the module docstring is broken."""
         with self._lock:
-            plans = dict(self._plans)
-            replayed = _replay(self._path, warn=False)
+            plans, events = dict(self._plans), list(self._events)
+            replayed_plans, replayed_events = _replay(self._path, warn=False)
         problems = [f"thread {thread}: {problem}"
                     for thread, plan in sorted(plans.items())
                     for problem in _violations(plan)]
-        if replayed != plans:
+        if replayed_plans != plans:
             problems.append("a fresh replay of the log differs from the memory")
+        if list(replayed_events) != events:
+            problems.append("the events of a fresh replay of the log differ from the memory")
         if problems:
             raise AssertionError("; ".join(problems))
 
@@ -123,6 +143,7 @@ class PlanStore:
             assert not _violations(new), _violations(new)
             self._append(record)
             self._plans[thread] = new
+            self._events.extend(_events(record, new))
             assert set(_ids(old)) <= set(_ids(new)), "an item id disappeared"
             return old, new
 
@@ -141,12 +162,14 @@ class PlanStore:
             log.flush()
 
 
-def _replay(path: pathlib.Path, warn: bool) -> dict[str, Plan]:
+def _replay(path: pathlib.Path, warn: bool) -> tuple[dict[str, Plan], deque[Event]]:
+    """The plans and the newest EVENTS_MAX events, oldest first, that the log gives."""
     plans: dict[str, Plan] = {}
+    events: deque[Event] = deque(maxlen=EVENTS_MAX)
     try:
         data = path.read_bytes()
     except FileNotFoundError:
-        return plans
+        return plans, events
     for number, raw in enumerate(data.split(b"\n"), start=1):
         if not raw.strip():
             continue
@@ -156,12 +179,16 @@ def _replay(path: pathlib.Path, warn: bool) -> dict[str, Plan]:
                 raise PlanError("not a JSON object")
             record = {"ts": entry["ts"], **_normalize(entry)}
             thread = record["thread"]
-            plans[thread] = _apply(plans.get(thread), record)
+            old = plans.get(thread)
+            new = _apply(old, record)
+            if new is not old:
+                plans[thread] = new
+                events.extend(_events(record, new))
         except (ValueError, KeyError, TypeError) as error:
             if warn:
                 print(f"agentmap: {path}:{number}: skipped log line: {error!r}",
                       file=sys.stderr)
-    return plans
+    return plans, events
 
 
 def _text(value, what: str, limit: int) -> str:
@@ -222,31 +249,54 @@ def _normalize(request: dict) -> dict:
 
 def _apply(plan: Plan | None, record: dict) -> Plan:
     """The plan after one normalized record. Return `plan` itself when nothing changes."""
-    ts = datetime.strptime(record["ts"], _TS_FORMAT).replace(tzinfo=timezone.utc)
-    base = plan or Plan(goal=None, status=None, items=(), updated_at=ts)
+    ts = _time(record)
+    base = plan or Plan(goal=None, status=None, items=(), updated_at=ts, status_at=None)
     op = record["op"]
     if op == "goal":
         return dataclasses.replace(base, goal=record["text"], updated_at=ts)
     if op == "status":
-        return dataclasses.replace(base, status=record["text"], updated_at=ts)
+        return dataclasses.replace(base, status=record["text"], updated_at=ts, status_at=ts)
     if op == "add":
-        items = _add(base.items, record["parent"], record["texts"], record["children"])
+        items = _add(base.items, record["parent"], record["texts"], record["children"], ts)
         return dataclasses.replace(base, items=items, updated_at=ts)
-    items = _mark(base.items, record["id"], record["state"])
+    items = _mark(base.items, record["id"], record["state"], ts)
     if items is base.items:
         return base
     return dataclasses.replace(base, items=items, updated_at=ts)
 
 
+def _time(record: dict) -> datetime:
+    return datetime.strptime(record["ts"], _TS_FORMAT).replace(tzinfo=timezone.utc)
+
+
+def _events(record: dict, plan: Plan) -> list[Event]:
+    """The events of one record that changed a plan into `plan`, in outline order."""
+    ts, thread, op = _time(record), record["thread"], record["op"]
+    if op in ("goal", "status"):
+        return [Event(ts, thread, op, record["text"])]
+    if op == "add":
+        groups = record["children"] or [[] for _ in record["texts"]]
+        texts = [text for text, group in zip(record["texts"], groups) for text in [text, *group]]
+        return [Event(ts, thread, "added", text) for text in texts]
+    item = next(i for top in plan.items for i in (top, *top.children) if i.id == record["id"])
+    return [Event(ts, thread, record["state"], item.text)]
+
+
+def _parent(item: Item, kids: tuple[Item, ...]) -> Item:
+    """`item` with the children `kids`, its derived state and the latest changed_at."""
+    changed_at = max(item.changed_at, *(kid.changed_at for kid in kids))
+    return Item(item.id, item.text, derived_state(kids), kids, changed_at)
+
+
 def _add(items: tuple[Item, ...], parent: str | None, texts: list[str],
-         children: list[list[str]] | None) -> tuple[Item, ...]:
+         children: list[list[str]] | None, ts: datetime) -> tuple[Item, ...]:
     if parent is None:
         groups = children or [[] for _ in texts]
         new = []
         for number, (text, group) in enumerate(zip(texts, groups), start=len(items) + 1):
-            kids = tuple(Item(f"{number}.{n}", kid, "todo", ())
+            kids = tuple(Item(f"{number}.{n}", kid, "todo", (), ts)
                          for n, kid in enumerate(group, start=1))
-            new.append(Item(str(number), text, "todo", kids))
+            new.append(Item(str(number), text, "todo", kids, ts))
         return items + tuple(new)
     if "." in parent:
         raise PlanError(f"Item {parent} is a child item. A plan has two levels only, "
@@ -258,13 +308,13 @@ def _add(items: tuple[Item, ...], parent: str | None, texts: list[str],
     if item.state == "done":
         raise PlanError(f"Item {parent} is done, so it gets no new children. "
                         "Add a new top-level item instead.")
-    kids = item.children + tuple(Item(f"{parent}.{n}", text, "todo", ())
+    kids = item.children + tuple(Item(f"{parent}.{n}", text, "todo", (), ts)
                                  for n, text in enumerate(texts, start=len(item.children) + 1))
-    changed = Item(item.id, item.text, derived_state(kids), kids)
-    return items[:position] + (changed,) + items[position + 1:]
+    return items[:position] + (_parent(item, kids),) + items[position + 1:]
 
 
-def _mark(items: tuple[Item, ...], item_id: str, state: str) -> tuple[Item, ...]:
+def _mark(items: tuple[Item, ...], item_id: str, state: str,
+          ts: datetime) -> tuple[Item, ...]:
     top_id = item_id.split(".")[0]
     position = next((n for n, item in enumerate(items) if item.id == top_id), None)
     if position is None:
@@ -274,28 +324,28 @@ def _mark(items: tuple[Item, ...], item_id: str, state: str) -> tuple[Item, ...]
         if top.children:
             raise PlanError(f"Item {item_id} has children. Its state follows them, "
                             "so mark the children instead.")
-        changed = _move(top, state)
+        changed = _move(top, state, ts)
     else:
         kid_position = next((n for n, kid in enumerate(top.children) if kid.id == item_id),
                             None)
         if kid_position is None:
             raise PlanError(f"There is no item {item_id}.")
-        kid = _move(top.children[kid_position], state)
+        kid = _move(top.children[kid_position], state, ts)
         if kid is top.children[kid_position]:
             return items
         kids = top.children[:kid_position] + (kid,) + top.children[kid_position + 1:]
-        changed = Item(top.id, top.text, derived_state(kids), kids)
+        changed = _parent(top, kids)
     if changed is top:
         return items
     return items[:position] + (changed,) + items[position + 1:]
 
 
-def _move(leaf: Item, state: str) -> Item:
+def _move(leaf: Item, state: str, ts: datetime) -> Item:
     if leaf.state == state:
         return leaf
     if _RANK[state] < _RANK[leaf.state]:
         raise PlanError(f"Item {leaf.id} is {leaf.state}; a state never moves back.")
-    return Item(leaf.id, leaf.text, state, ())
+    return Item(leaf.id, leaf.text, state, (), ts)
 
 
 def _ids(plan: Plan | None) -> list[str]:

@@ -14,13 +14,23 @@ The model:
   turn items of its newest run. Active items left behind in a finished run
   are stale, and the reader ignores them.
 - The thought, the last thing said and the touched paths come from all the
-  turn items of the thread.
+  turn items of the thread. Each carries the start time of the item it came
+  from.
+- Events (see `events`) are dated facts inside the window: a thread started,
+  a file edit, a request to the user, the end of a run.
 
 Cache: T3 Code moves a thread's `updated_at` whenever one of its turn items
 or runs changes. The reader keeps the item-derived details of each thread
 and reads the turn items again only when `updated_at` or the newest run
 changed. The liveness query runs on every snapshot, because a native
-subagent's liveness lives in its parent's turn items.
+subagent's liveness lives in its parent's turn items. `events` keeps its own
+cache per thread with the same key rule, and also reads the end of a native
+subagent on every call.
+
+Both item scans (touched paths and events) read only the items with an
+ordinal above the newest ordinal that they saw. T3 Code appends items with
+growing ordinals, and writes an item's path, question and start time when it
+creates the item.
 """
 
 from __future__ import annotations
@@ -35,12 +45,17 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agentmap.events import KINDS, Event
+
 WORKING_RUN = frozenset({"queued", "preparing", "starting", "running", "waiting"})
 ACTIVE_ITEM = ("pending", "running", "waiting")
 REQUESTS = frozenset({"user_input_request", "approval_request", "secret_request"})
 MAX_TOUCHED = 8
 MAX_SENTENCE = 160
 MAX_COMMAND = 100
+MAX_EVENTS = 80
+# The status of an ended run or subagent item, and the kind of its event.
+END_KIND = {"completed": "finished", "failed": "failed"}
 
 _BASH_LC = re.compile(r"^(?:\S*/)?bash -lc\s+(.*)$", re.DOTALL)
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
@@ -48,12 +63,22 @@ _CLAUDE_WORKTREE = re.compile(r"^\.claude/worktrees/[^/]+/")
 
 
 @dataclass(frozen=True)
+class Touch:
+    """A touched path, and the start time (aware UTC) of the newest item that touched it."""
+
+    path: str
+    at: datetime
+
+
+@dataclass(frozen=True)
 class AgentThread:
     """One T3 Code thread as the dashboard shows it.
 
     `state` is one of working, needs_you, idle, failed. `touched` holds up to
-    MAX_TOUCHED project-relative paths, newest first. In a snapshot, every
-    `parent_id` names a thread of the same snapshot, or is None.
+    MAX_TOUCHED project-relative paths, newest first, without repeats.
+    `thought_at` and `said_at` are the start times of the items that `thought`
+    and `last_said` came from, or None when those are None. In a snapshot,
+    every `parent_id` names a thread of the same snapshot, or is None.
     """
 
     id: str
@@ -67,7 +92,9 @@ class AgentThread:
     now: str | None
     thought: str | None
     last_said: str | None
-    touched: tuple[str, ...]
+    thought_at: datetime | None
+    said_at: datetime | None
+    touched: tuple[Touch, ...]
 
 
 @dataclass(frozen=True)
@@ -76,10 +103,22 @@ class _Details:
 
     needs_you: bool
     now: str | None
-    thought: str | None
-    last_said: str | None
-    touched: tuple[str, ...]
+    thought: tuple[str, datetime] | None
+    said: tuple[str, datetime] | None
+    touched: tuple[Touch, ...]
     touched_ordinal: int  # The newest ordinal that the touched scan has seen.
+
+
+@dataclass(frozen=True)
+class _Log:
+    """What `events` keeps of one thread between calls."""
+
+    updated_at: str  # The thread's updated_at when the log was read.
+    ordinal: int  # The newest ordinal that the item scan has seen.
+    items: tuple[Event, ...]  # Edits and asks at or after the window start of their scan.
+    runs: tuple[Event, ...]  # Ends of runs inside the window.
+    node_id: str | None  # The subagent item's node, for a thread without runs.
+    said: str  # The first sentence of the newest message, for a thread without runs.
 
 
 # The MCP server name that the harness configurations give agentmap.
@@ -104,6 +143,7 @@ class T3Reader:
         self._lock = threading.Lock()
         self._data_version: int | None = None
         self._cache: dict[str, tuple[tuple, _Details]] = {}
+        self._logs: dict[str, _Log] = {}
 
     def close(self) -> None:
         self._conn.close()
@@ -170,6 +210,27 @@ class T3Reader:
         threads.sort(key=lambda t: (t.created_at, t.id))
         return threads
 
+    def events(self, now: datetime) -> list[Event]:
+        """What the snapshot's threads did inside the window up to `now`, newest first.
+
+        Gives at most MAX_EVENTS events. `now` must not move back between calls,
+        because the cache keeps only the items inside the window of its scan.
+        """
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        start = now - self._window
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                rows = self._thread_rows(_stamp(start))
+                found = [event for row in rows.values() for event in self._events(row, start)]
+            finally:
+                self._conn.execute("COMMIT")
+        self._logs = {k: v for k, v in self._logs.items() if k in rows}
+        found = [e for e in found if start <= e.at <= now]
+        found.sort(key=lambda e: (e.at, e.thread_id, KINDS.index(e.kind), e.text), reverse=True)
+        return found[:MAX_EVENTS]
+
     # Queries. Each runs with self._lock held.
 
     def _project_ids(self) -> list[str]:
@@ -212,8 +273,9 @@ class T3Reader:
             id=thread_id, parent_id=_parent_of(row), title=title,
             provider=_provider(payload.get("providerInstanceId") or ""), model=model,
             state=state, created_at=_parse(created_at), updated_at=_parse(updated_at),
-            now=details.now, thought=details.thought, last_said=details.last_said,
-            touched=details.touched)
+            now=details.now, thought=_text_of(details.thought),
+            last_said=_text_of(details.said), thought_at=_time_of(details.thought),
+            said_at=_time_of(details.said), touched=details.touched)
 
     def _liveness(self, thread_id: str, payload: dict) -> tuple[str | None, str]:
         """The newest run's id (None for a native subagent) and one of working, failed, idle."""
@@ -251,21 +313,28 @@ class T3Reader:
             thread_id, roots, before.touched if before else (),
             before.touched_ordinal if before else -1)
         return _Details(needs_you=needs_you, now=now,
-                        thought=self._first_sentence_of_newest(thread_id, "reasoning"),
-                        last_said=self._first_sentence_of_newest(thread_id, "assistant_message"),
+                        thought=self._newest_sentence("thread_id", thread_id, "reasoning"),
+                        said=self._newest_sentence("thread_id", thread_id, "assistant_message"),
                         touched=touched, touched_ordinal=touched_ordinal)
 
-    def _first_sentence_of_newest(self, thread_id: str, type_: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT json_extract(payload_json, '$.text') AS text"
-            " FROM orchestration_v2_projection_turn_items"
-            " WHERE thread_id = ? AND type = ?"
-            " AND trim(coalesce(text, ''), ' ' || char(9, 10, 13)) != ''"
-            " ORDER BY ordinal DESC LIMIT 1", (thread_id, type_)).fetchone()
-        return _first_sentence(row[0]) if row else None
+    def _newest_sentence(self, column: str, value: str,
+                         type_: str) -> tuple[str, datetime] | None:
+        """The first sentence of the newest non-blank text of this type, and its item's start.
 
-    def _touched(self, thread_id: str, roots: list[str], before: tuple[str, ...],
-                 after: int) -> tuple[tuple[str, ...], int]:
+        `column` is thread_id or run_id: the items of one thread or of one run.
+        """
+        row = self._conn.execute(
+            "SELECT json_extract(payload_json, '$.text') AS text,"
+            " json_extract(payload_json, '$.startedAt')"
+            " FROM orchestration_v2_projection_turn_items"
+            f" WHERE {column} = ? AND type = ?"
+            " AND trim(coalesce(text, ''), ' ' || char(9, 10, 13)) != ''"
+            " ORDER BY ordinal DESC LIMIT 1", (value, type_)).fetchone()
+        sentence = _first_sentence(row[0]) if row else None
+        return (sentence, _parse(row[1])) if sentence else None
+
+    def _touched(self, thread_id: str, roots: list[str], before: tuple[Touch, ...],
+                 after: int) -> tuple[tuple[Touch, ...], int]:
         """The touched paths, and the newest ordinal seen.
 
         The scan reads only the items newer than `after`, and puts the paths that it
@@ -275,21 +344,83 @@ class T3Reader:
             "SELECT ordinal, coalesce(json_extract(payload_json, '$.fileName'),"
             " json_extract(payload_json, '$.input.file_path'),"
             " json_extract(payload_json, '$.input.path'),"
-            " json_extract(payload_json, '$.input.notebook_path')) AS path"
+            " json_extract(payload_json, '$.input.notebook_path')) AS path,"
+            " json_extract(payload_json, '$.startedAt')"
             " FROM orchestration_v2_projection_turn_items"
             " WHERE thread_id = ? AND ordinal > ? AND type IN ('file_change', 'dynamic_tool')"
             " AND path IS NOT NULL ORDER BY ordinal DESC", (thread_id, after))
-        touched: list[str] = []
+        touched: list[Touch] = []
+        seen: set[str] = set()
         newest = after
-        for ordinal, path in rows:
+        for ordinal, path, started in rows:
             newest = max(newest, ordinal)
             rel = _relative(path, roots)
-            if rel is not None and rel not in touched:
-                touched.append(rel)
+            if rel is not None and rel not in seen:
+                seen.add(rel)
+                touched.append(Touch(rel, _parse(started)))
                 if len(touched) == MAX_TOUCHED:
                     break
-        touched += [p for p in before if p not in touched]
+        touched += [t for t in before if t.path not in seen]
         return tuple(touched[:MAX_TOUCHED]), newest
+
+    def _events(self, row: tuple, start: datetime) -> list[Event]:
+        """The events of one thread: those of its cached log, its start and a subagent's end."""
+        thread_id, title, created_at, updated_at, payload_json = row
+        payload = json.loads(payload_json)
+        log = self._logs.get(thread_id)
+        if log is None or log.updated_at != updated_at:
+            log = self._read_log(thread_id, payload, updated_at, start, log)
+            self._logs[thread_id] = log
+        events = [Event(_parse(created_at), thread_id, "started", title), *log.items, *log.runs]
+        if log.node_id is not None:
+            item = self._conn.execute(
+                "SELECT status, json_extract(payload_json, '$.completedAt')"
+                " FROM orchestration_v2_projection_turn_items"
+                " WHERE node_id = ? AND type = 'subagent' ORDER BY ordinal DESC LIMIT 1",
+                (log.node_id,)).fetchone()
+            if item and item[0] in END_KIND and item[1]:
+                events.append(Event(_parse(item[1]), thread_id, END_KIND[item[0]], log.said))
+        return events
+
+    def _read_log(self, thread_id: str, payload: dict, updated_at: str, start: datetime,
+                  before: _Log | None) -> _Log:
+        """The log of one thread, from the items newer than those that `before` saw."""
+        roots = [r for r in (payload.get("worktreePath"), self._root) if r]
+        newest = before.ordinal if before else -1
+        items: list[Event] = []
+        for ordinal, type_, item_json in self._conn.execute(
+                "SELECT ordinal, type, payload_json FROM orchestration_v2_projection_turn_items"
+                " WHERE thread_id = ? AND ordinal > ? AND type IN ('file_change',"
+                " 'user_input_request', 'approval_request', 'secret_request')"
+                " ORDER BY ordinal DESC", (thread_id, newest)):
+            newest = max(newest, ordinal)
+            item = json.loads(item_json)
+            at = _parse(item["startedAt"])
+            if at < start:
+                continue
+            if type_ in REQUESTS:
+                items.append(Event(at, thread_id, "asks", _ask(type_, item)))
+                continue
+            rel = _relative(item.get("fileName") or "", roots)
+            if rel is not None:
+                items.append(Event(at, thread_id, "edits", rel))
+        items += [e for e in (before.items if before else ()) if e.at >= start]
+        runs = self._conn.execute(
+            "SELECT run_id, status, completed_at FROM orchestration_v2_projection_runs"
+            " WHERE thread_id = ? AND status IN ('completed', 'failed') AND completed_at >= ?",
+            (thread_id, _stamp(start))).fetchall()
+        ends = tuple(Event(_parse(completed_at), thread_id, END_KIND[status],
+                           _text_of(self._newest_sentence("run_id", run_id, "assistant_message"))
+                           or "")
+                     for run_id, status, completed_at in runs)
+        has_run = runs or self._conn.execute(
+            "SELECT 1 FROM orchestration_v2_projection_runs WHERE thread_id = ? LIMIT 1",
+            (thread_id,)).fetchone()
+        node_id = None if has_run else (payload.get("forkedFrom") or {}).get("nodeId")
+        said = (_text_of(self._newest_sentence("thread_id", thread_id, "assistant_message"))
+                if node_id else None)
+        return _Log(updated_at=updated_at, ordinal=newest, items=tuple(items), runs=ends,
+                    node_id=node_id, said=said or "")
 
 
 def _stamp(t: datetime) -> str:
@@ -299,6 +430,29 @@ def _stamp(t: datetime) -> str:
 
 def _parse(text: str) -> datetime:
     return datetime.fromisoformat(text)
+
+
+def _text_of(found: tuple[str, datetime] | None) -> str | None:
+    return found[0] if found else None
+
+
+def _time_of(found: tuple[str, datetime] | None) -> datetime | None:
+    return found[1] if found else None
+
+
+def _ask(type_: str, item: dict) -> str:
+    """The first sentence of what a request asks, or "".
+
+    A question gives its first question, an approval its prompt, a secret its label.
+    """
+    if type_ == "user_input_request":
+        questions = item.get("questions") or [{}]
+        text = questions[0].get("question")
+    elif type_ == "approval_request":
+        text = item.get("prompt")
+    else:
+        text = item.get("label")
+    return (_first_sentence(text) if isinstance(text, str) else None) or ""
 
 
 def _parent_of(row: tuple) -> str | None:

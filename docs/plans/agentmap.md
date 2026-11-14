@@ -64,10 +64,29 @@ class PlanStore:
     def mark(self, thread: str, item_id: str, state: str) -> None: ...  # state is "doing" or "done"
     def plan(self, thread: str) -> Plan | None: ...
     def plans(self) -> dict[str, Plan]: ...
+    def events(self) -> list[Event]: ...      # newest first, at most 200, all threads
     def check_invariants(self) -> None: ...   # raises AssertionError on a broken invariant
 ```
 
-`Plan` and `Item` are frozen dataclasses: `Plan(goal, status, items, updated_at)` and `Item(id, text, state, children)`.
+`Plan` and `Item` are frozen dataclasses: `Plan(goal, status, items, updated_at, status_at)` and `Item(id, text, state, children, changed_at)`.
+
+Times. Every time in a plan is the `ts` of a log record. Thus a replay gives the same times.
+
+- `updated_at` is the time of the last change to the plan.
+- `status_at` is the time of the latest status line, or `None` when the thread never set one.
+- A leaf's `changed_at` is the time of its creation or of its latest state change.
+- A parent's `changed_at` is the latest `changed_at` of the parent itself and its children.
+
+Events. `events()` gives what agents posted, as `Event` values (see `events.py`), newest first. Each change gives events:
+
+| Change | Events |
+|---|---|
+| `set_goal` | One `goal` event. The text is the goal. |
+| `set_status` | One `status` event. The text is the status line. |
+| `add_items` | One `added` event per new item, children included. The text is the item text. |
+| `mark` | One `doing` or `done` event. The text is the text of the marked item. A parent whose derived state changes gets no event. |
+
+A request that changes nothing gives no event. The store keeps only the newest 200 events in memory. Events at the same second keep the order of the log.
 
 Rules:
 
@@ -99,6 +118,7 @@ Invariants, which `check_invariants` tests:
 3. Each leaf state is one of `todo`, `doing`, `done`.
 4. Each parent state equals the state derived from its children.
 5. A fresh replay of the log gives the same plans as the memory.
+6. A fresh replay of the log gives the same events as the memory.
 
 ### mcp.py: the MCP endpoint
 
@@ -194,6 +214,7 @@ class T3Reader:
     def snapshot(self, now: datetime) -> list[AgentThread]: ...
     def thread_project(self, thread_id: str) -> bool | None: ...
     def find_tool_calls(self, tool: str, arguments: dict, now: datetime) -> list[tuple[str, str]]: ...
+    def events(self, now: datetime) -> list[Event]: ...   # newest first, at most 80
 ```
 
 `find_tool_calls` reads `dynamic_tool` items with the status `pending`, `running` or `waiting`. It keeps an item when all of these are true:
@@ -216,7 +237,10 @@ class T3Reader:
 | `now` | The now line, or `None`. |
 | `thought` | The first sentence of the newest thinking text, at most 160 characters, or `None`. |
 | `last_said` | The first sentence of the newest assistant message, at most 160 characters, or `None`. |
-| `touched` | Up to 8 touched paths, newest first, without repeats. |
+| `thought_at`, `said_at` | The `startedAt` time of the item that `thought` or `last_said` came from. `None` when that text is `None`. |
+| `touched` | Up to 8 `Touch(path, at)` values, newest first, without repeated paths. `at` is the `startedAt` time of the newest item that touched the path. |
+
+All times are timezone-aware UTC.
 
 Facts about the database (schema of T3 Code on 2026-11-14):
 
@@ -224,6 +248,8 @@ Facts about the database (schema of T3 Code on 2026-11-14):
 - `orchestration_v2_projection_threads` has one row per thread. Its `payload_json` has `lineage.parentThreadId`, `worktreePath`, `modelSelection.model` and `providerInstanceId`. Skip rows with `deleted_at` or `archived_at`.
 - `orchestration_v2_projection_runs` has the runs of a thread, with `ordinal` and `status`. The newest run's status gives the state: `queued`, `preparing`, `starting`, `running` and `waiting` mean working. `failed` means failed. Other values mean idle.
 - `orchestration_v2_projection_turn_items` has each step of a run. The `type` column and `payload_json` hold the content. A waiting `user_input_request`, `approval_request` or `secret_request` item means `needs_you`.
+- A run row has `completed_at` once the run ends.
+- Every turn item's payload has `startedAt`. An ended item also has `completedAt`.
 - The database is in WAL mode. Open it with `file:...?mode=ro` and `uri=True`.
 
 Which threads a snapshot holds: threads of the project with `updated_at` inside the window, plus all ancestors of those threads, so that every tree is whole.
@@ -248,6 +274,33 @@ Now line rules, from the newest turn item that is `pending`, `running` or `waiti
 Touched paths come from `file_change.fileName` and from the `file_path`, `path` or `notebook_path` input of `dynamic_tool` items. A path inside the thread's worktree or inside the project root becomes relative to that root. Another path is not a touched path.
 
 Speed: one `snapshot` call must take under 50 ms on the real database with 50 threads in the window. Cache the result per thread. When the newest item of a thread changed, read its turn items again.
+
+Events. `events(now)` reads the threads that `snapshot` holds, ancestors included. It gives the events with a time inside the window and not after `now`, newest first, at most 80. Events at the same time are in a fixed order: by thread id, then kind, then text, all descending.
+
+| Kind | Source | Time | Text |
+|---|---|---|---|
+| `started` | The thread row. | `created_at` | The thread title. |
+| `edits` | A `file_change` item with a touched path. | `startedAt` | The touched path. |
+| `asks` | A `user_input_request`, `approval_request` or `secret_request` item. | `startedAt` | The first sentence of the first `questions[].question`, of `prompt`, or of `label`. `""` when there is none. |
+| `finished`, `failed` | A run with the status `completed` or `failed`. | `completed_at` | The first sentence of the run's newest assistant message, or `""`. |
+
+A native subagent has no runs. Its parent's `subagent` item stands for its run, as for its state. When that item is `completed` or `failed` and has `completedAt`, the subagent gets a `finished` or `failed` event at that time. The text is the first sentence of the subagent's newest assistant message.
+
+Cache: `events` keeps a log per thread. It reads the thread again only when `updated_at` moved. Then it reads only the items newer than the newest ordinal that it saw, and drops the events that left the window. It reads the end of a native subagent on every call. `now` must not move back between calls. Speed: under 30 ms per call on the real database with a 3-hour window.
+
+### events.py: dated facts
+
+```python
+@dataclass(frozen=True)
+class Event:
+    at: datetime      # timezone-aware UTC
+    thread_id: str
+    kind: str         # one of KINDS
+    text: str         # the detail; "" when there is none
+KINDS = ("started", "edits", "asks", "finished", "failed", "goal", "status", "added", "doing", "done")
+```
+
+An event is one dated fact about one thread. The page uses events for its running event log, and it fades each mark by its age. `T3Reader.events` makes the first five kinds. `PlanStore.events` makes the last five.
 
 ### treemap.py: the project map
 
