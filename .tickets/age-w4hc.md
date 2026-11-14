@@ -1,6 +1,6 @@
 ---
 id: age-w4hc
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-14T16:53:39Z

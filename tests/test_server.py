@@ -349,6 +349,16 @@ class CellCacheTest(unittest.TestCase):
             self.assertEqual([c.key for c in cache()], ["lib", "lib/."])
             self.assertEqual((cache()[0].w, cache()[0].h), (1080.0, 600.0))
 
+    def test_the_anchors_follow_the_files_of_the_last_refresh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "lib" / "deep").mkdir(parents=True)
+            (Path(tmp) / "lib" / "deep" / "a.py").write_text("x\n")
+            (Path(tmp) / "top.py").write_text("x\n")
+            cache = CellCache(Path(tmp))
+            self.assertEqual(cache.anchors(), frozenset())
+            cache.refresh()
+            self.assertEqual(cache.anchors(), frozenset({"lib/deep"}))
+
 
 class PageBeforeFirstTickTest(unittest.TestCase):
     def test_the_page_has_an_app_element_before_the_first_render(self):

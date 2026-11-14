@@ -37,9 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.t3_db.exists():
         print(f"agentmap: T3 Code database not found at {args.t3_db}", file=sys.stderr)
         return 2
-    reader = T3Reader(args.t3_db, root, timedelta(hours=args.hours))
-    store = PlanStore(root / ".agentmap" / "plan.jsonl")
     cells = CellCache(root)
+    # The reader keeps what it reads from old items, so the anchors must be in
+    # place before its first scan: a path that it drops then stays dropped.
+    cells.refresh()
+    reader = T3Reader(args.t3_db, root, timedelta(hours=args.hours), anchors=cells.anchors)
+    store = PlanStore(root / ".agentmap" / "plan.jsonl")
     # Codex threads share one process and send no thread header. The finder
     # names their thread from T3 Code's record of the call.
     find_caller = CallerFinder(

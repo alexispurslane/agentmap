@@ -41,6 +41,7 @@ import re
 import shlex
 import sqlite3
 import threading
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -102,6 +103,19 @@ class AgentThread:
 
 
 @dataclass(frozen=True)
+class _Places:
+    """What `_relative` needs to turn an absolute path into a project path.
+
+    `roots` are checkouts that the reader knows: the thread's worktree and the
+    project root. `anchors` are the first two parts of the project's file paths,
+    which find the project inside any other copy of it.
+    """
+
+    roots: tuple[str, ...]
+    anchors: Collection[str]
+
+
+@dataclass(frozen=True)
 class _Details:
     """What the reader derives from the turn items of one thread."""
 
@@ -138,8 +152,10 @@ class T3Reader:
     from other Python threads while the poller calls `snapshot`.
     """
 
-    def __init__(self, db_path: Path, project_root: Path, window: timedelta):
+    def __init__(self, db_path: Path, project_root: Path, window: timedelta, *,
+                 anchors: Callable[[], Collection[str]] = frozenset):
         self._root = posixpath.normpath(str(Path(project_root).absolute()))
+        self._anchors = anchors
         self._window = window
         uri = Path(db_path).absolute().as_uri() + "?mode=ro"
         self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False,
@@ -151,6 +167,11 @@ class T3Reader:
 
     def close(self) -> None:
         self._conn.close()
+
+    def _places(self, payload: dict) -> _Places:
+        """Where a path of this thread can be: its worktree, the project root, other copies."""
+        roots = tuple(r for r in (payload.get("worktreePath"), self._root) if r)
+        return _Places(roots, self._anchors())
 
     def changed(self) -> bool:
         """True if PRAGMA data_version moved since the last call, and on the first call."""
@@ -312,7 +333,7 @@ class T3Reader:
 
     def _details(self, thread_id: str, payload: dict, run_id: str | None, working: bool,
                  before: _Details | None) -> _Details:
-        roots = [r for r in (payload.get("worktreePath"), self._root) if r]
+        places = self._places(payload)
         needs_you, now = False, None
         if working:
             # The status list is literal so that SQLite can use T3 Code's partial index of
@@ -324,10 +345,10 @@ class T3Reader:
                 " WHERE thread_id = ? AND status IN ('pending', 'running', 'waiting')"
                 " ORDER BY ordinal DESC", (thread_id,)) if r == run_id]
             needs_you = any(t in REQUESTS and s == "waiting" for t, s, _ in active)
-            lines = (_now_line(t, json.loads(p), roots) for t, _, p in active)
+            lines = (_now_line(t, json.loads(p), places) for t, _, p in active)
             now = next((line for line in lines if line), None)
         touched, touched_ordinal = self._touched(
-            thread_id, roots, before.touched if before else (),
+            thread_id, places, before.touched if before else (),
             before.touched_ordinal if before else -1)
         return _Details(needs_you=needs_you, now=now,
                         thought=self._newest_sentence("thread_id", thread_id, "reasoning"),
@@ -350,7 +371,7 @@ class T3Reader:
         sentence = _first_sentence(row[0]) if row else None
         return (sentence, _parse(row[1])) if sentence else None
 
-    def _touched(self, thread_id: str, roots: list[str], before: tuple[Touch, ...],
+    def _touched(self, thread_id: str, places: _Places, before: tuple[Touch, ...],
                  after: int) -> tuple[tuple[Touch, ...], int]:
         """The touched paths, and the newest ordinal seen.
 
@@ -371,7 +392,7 @@ class T3Reader:
         newest = after
         for ordinal, path, started in rows:
             newest = max(newest, ordinal)
-            rel = _relative(path, roots)
+            rel = _relative(path, places)
             if rel is not None and rel not in seen:
                 seen.add(rel)
                 touched.append(Touch(rel, _parse(started)))
@@ -402,7 +423,7 @@ class T3Reader:
     def _read_log(self, thread_id: str, payload: dict, updated_at: str, start: datetime,
                   before: _Log | None) -> _Log:
         """The log of one thread, from the items newer than those that `before` saw."""
-        roots = [r for r in (payload.get("worktreePath"), self._root) if r]
+        places = self._places(payload)
         newest = before.ordinal if before else -1
         items: list[Event] = []
         for ordinal, type_, item_json in self._conn.execute(
@@ -418,7 +439,7 @@ class T3Reader:
             if type_ in REQUESTS:
                 items.append(Event(at, thread_id, "asks", _ask(type_, item)))
                 continue
-            rel = _relative(item.get("fileName") or "", roots)
+            rel = _relative(item.get("fileName") or "", places)
             if rel is not None:
                 items.append(Event(at, thread_id, "edits", rel))
         items += [e for e in (before.items if before else ()) if e.at >= start]
@@ -491,15 +512,30 @@ def _liveness_of(status: str, working: frozenset | tuple) -> str:
     return "failed" if status == "failed" else "idle"
 
 
-def _relative(path: str, roots: list[str]) -> str | None:
-    """The path relative to the first root that holds it, or None."""
+def anchors(paths: Iterable[str]) -> frozenset[str]:
+    """The first two parts of each project-relative path that has two or more parts."""
+    return frozenset("/".join(p.split("/")[:2]) for p in paths if "/" in p)
+
+
+def _relative(path: str, places: _Places) -> str | None:
+    """The path in the project, or None.
+
+    A path under a root is relative to the first root that holds it. Any other
+    absolute path is taken to be in another copy of the project, such as a
+    scratch clone or another worktree: it starts at its first pair of parts,
+    from the left, that is an anchor.
+    """
     if not path.startswith("/"):
         return None
     path = posixpath.normpath(path)
-    for root in roots:
+    for root in places.roots:
         root = posixpath.normpath(root)
         if path.startswith(root + "/"):
             return _CLAUDE_WORKTREE.sub("", path[len(root) + 1:])
+    parts = path.split("/")[1:]
+    for i in range(len(parts) - 1):
+        if f"{parts[i]}/{parts[i + 1]}" in places.anchors:
+            return "/".join(parts[i:])
     return None
 
 
@@ -521,7 +557,7 @@ def _command(text: str) -> str:
     return first if len(first) <= MAX_COMMAND else first[:MAX_COMMAND - 1] + "…"
 
 
-def _now_line(type_: str, item: dict, roots: list[str]) -> str | None:
+def _now_line(type_: str, item: dict, places: _Places) -> str | None:
     """The now line of one active turn item, or None if its kind has no now line.
 
     An item that lacks the detail that its rule names gets a general line.
@@ -531,10 +567,10 @@ def _now_line(type_: str, item: dict, roots: list[str]) -> str | None:
         return "Running: " + command if command else "Running a command"
     if type_ == "file_change":
         path = item.get("fileName")
-        return "Editing " + (_relative(path, roots) or path) if path else "Editing a file"
+        return "Editing " + (_relative(path, places) or path) if path else "Editing a file"
     if type_ == "dynamic_tool":
         name = item.get("toolName")
-        return _tool_line(name, item.get("input"), roots) if name else "Using a tool"
+        return _tool_line(name, item.get("input"), places) if name else "Using a tool"
     if type_ == "web_search":
         patterns = item.get("patterns")
         return "Searching the web: " + patterns[0] if patterns else "Searching the web"
@@ -549,12 +585,12 @@ def _now_line(type_: str, item: dict, roots: list[str]) -> str | None:
     return None
 
 
-def _tool_line(name: str, args: object, roots: list[str]) -> str:
+def _tool_line(name: str, args: object, places: _Places) -> str:
     if not isinstance(args, dict):
         args = {}
     if name == "Read" and args.get("file_path"):
         path = args["file_path"]
-        return "Reading " + (_relative(path, roots) or path)
+        return "Reading " + (_relative(path, places) or path)
     if name in ("Grep", "Glob") and args.get("pattern"):
         return "Searching " + args["pattern"]
     if name.endswith("delegate_task") and args.get("title"):

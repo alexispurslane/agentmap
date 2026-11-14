@@ -271,7 +271,11 @@ Now line rules, from the newest turn item that is `pending`, `running` or `waiti
 | `subagent` | `Waiting on ` + the subagent title. |
 | `user_input_request`, `approval_request`, `secret_request` | `Needs your answer`. |
 
-Touched paths come from `file_change.fileName` and from the `file_path`, `path` or `notebook_path` input of `dynamic_tool` items. A path inside the thread's worktree or inside the project root becomes relative to that root. Another path is not a touched path.
+Touched paths come from `file_change.fileName` and from the `file_path`, `path` or `notebook_path` input of `dynamic_tool` items. A path inside the thread's worktree or inside the project root becomes relative to that root.
+
+Agents also edit files in other copies of the project, such as another T3 worktree or a scratch clone under `/tmp`. An anchor is the first two parts of a project file's path, for example `src/render` or `docs/plan.md`. The server's `CellCache` keeps the anchors of the last file listing, and `T3Reader` gets them through its `anchors` argument. For a path outside both roots, the reader looks for the first pair of parts, from the left, that is an anchor. The path in the project starts there. A path without an anchor is not a touched path.
+
+The reader keeps the touched paths of items that it read before. So `__main__` lists the project's files once before the reader's first scan.
 
 Speed: one `snapshot` call must take under 50 ms on the real database with 50 threads in the window. Cache the result per thread. When the newest item of a thread changed, read its turn items again.
 

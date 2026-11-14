@@ -14,7 +14,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from agentmap.events import Event
-from agentmap.t3 import AgentThread, T3Reader, Touch
+from agentmap.t3 import AgentThread, T3Reader, Touch, anchors
 
 SCHEMA = (pathlib.Path(__file__).parent / "t3_fixture_schema.sql").read_text()
 
@@ -106,8 +106,8 @@ class Fixture:
             "UPDATE orchestration_v2_projection_turn_items SET status = ? WHERE turn_item_id = ?",
             (status, item_id))
 
-    def reader(self, test, root=ROOT, hours=3):
-        reader = T3Reader(self.path, pathlib.Path(root), timedelta(hours=hours))
+    def reader(self, test, root=ROOT, hours=3, anchors=frozenset):
+        reader = T3Reader(self.path, pathlib.Path(root), timedelta(hours=hours), anchors=anchors)
         test.addCleanup(reader.close)
         return reader
 
@@ -691,6 +691,85 @@ class TouchedPaths(unittest.TestCase):
         self.f.item("t", "file_change", fileName=ROOT + "/src/../lib/x.rs")
         self.f.item("t", "file_change", fileName=ROOT + "/../elsewhere/y.rs")
         self.assertEqual(self.touched(), ("lib/x.rs",))
+
+
+class OtherCheckouts(unittest.TestCase):
+    """A path in another copy of the project maps to the project by its folders.
+
+    The anchors are the first two parts of each project file's path, such as
+    "src/render" or "docs/plan.md".
+    """
+
+    ANCHORS = frozenset({"src/render", "src/core", "docs/plan.md", "tools/preview"})
+
+    def setUp(self):
+        self.f = Fixture(self)
+        self.f.thread("t", updated=1, worktree="/wt/t1")
+
+    def snapshot(self, anchors=ANCHORS):
+        return by_id(self.f.reader(self, anchors=lambda: anchors).snapshot(NOW))["t"]
+
+    def test_a_path_in_a_scratch_copy_maps_from_its_first_anchor(self):
+        self.f.item("t", "file_change", fileName="/tmp/t7/robust/x/src/render/shaders/a.comp")
+        self.assertEqual(paths(self.snapshot().touched), ("src/render/shaders/a.comp",))
+
+    def test_a_path_in_another_worktree_maps_the_same_way(self):
+        self.f.item("t", "file_change", fileName="/home/u/.t3/worktrees/proj/t0-6gej/tools/preview/p.py")
+        self.assertEqual(paths(self.snapshot().touched), ("tools/preview/p.py",))
+
+    def test_a_file_two_parts_deep_is_its_own_anchor(self):
+        self.f.item("t", "file_change", fileName="/tmp/copy/docs/plan.md")
+        self.assertEqual(paths(self.snapshot().touched), ("docs/plan.md",))
+
+    def test_an_anchor_can_be_the_first_part_of_the_path(self):
+        self.f.item("t", "file_change", fileName="/src/render/x.rs")
+        self.assertEqual(paths(self.snapshot().touched), ("src/render/x.rs",))
+
+    def test_the_first_anchor_from_the_left_wins(self):
+        self.f.item("t", "file_change", fileName="/tmp/copy/src/core/src/render/x.rs")
+        self.assertEqual(paths(self.snapshot().touched), ("src/core/src/render/x.rs",))
+
+    def test_a_path_without_an_anchor_is_not_a_touched_path(self):
+        self.f.item("t", "file_change", fileName="/tmp/t7/robust/panel.py")
+        self.f.item("t", "file_change", fileName="/tmp/copy/src/new.rs")
+        self.f.item("t", "file_change", fileName="/tmp/copy/src")
+        self.assertEqual(paths(self.snapshot().touched), ())
+
+    def test_a_path_under_a_root_keeps_the_root_even_if_an_anchor_appears_later(self):
+        self.f.item("t", "file_change", fileName=ROOT + "/vendor/src/render/x.rs")
+        self.f.item("t", "file_change", fileName="/wt/t1/lib/src/core/y.rs")
+        self.assertEqual(paths(self.snapshot().touched), ("lib/src/core/y.rs", "vendor/src/render/x.rs"))
+
+    def test_without_anchors_a_path_outside_the_roots_is_dropped(self):
+        self.f.item("t", "file_change", fileName="/tmp/copy/src/render/x.rs")
+        self.assertEqual(paths(self.snapshot(anchors=frozenset()).touched), ())
+
+    def test_the_tool_line_names_the_mapped_path(self):
+        run = self.f.run("t", 1, "running")
+        self.f.item("t", "file_change", "running", run, fileName="/tmp/copy/src/core/z.rs")
+        self.assertEqual(self.snapshot().now, "Editing src/core/z.rs")
+
+    def test_an_edit_event_names_the_mapped_path(self):
+        self.f.item("t", "file_change", started=2, fileName="/tmp/copy/src/core/z.rs")
+        reader = self.f.reader(self, anchors=lambda: self.ANCHORS)
+        edits = [e.text for e in reader.events(NOW) if e.kind == "edits"]
+        self.assertEqual(edits, ["src/core/z.rs"])
+
+    def test_the_reader_asks_for_the_anchors_on_each_scan(self):
+        anchors = [frozenset()]
+        reader = self.f.reader(self, anchors=lambda: anchors[0])
+        self.f.item("t", "file_change", fileName="/tmp/copy/src/core/old.rs")
+        reader.snapshot(NOW)
+        anchors[0] = self.ANCHORS
+        self.f.item("t", "file_change", fileName="/tmp/copy/src/core/new.rs")
+        self.f.touch("t", 0.5)
+        self.assertEqual(paths(by_id(reader.snapshot(NOW))["t"].touched), ("src/core/new.rs",))
+
+
+class Anchors(unittest.TestCase):
+    def test_the_anchors_are_the_first_two_parts_of_each_path(self):
+        self.assertEqual(anchors(["src/render/a.rs", "src/render/b.rs", "docs/plan.md", "README.md"]),
+                         frozenset({"src/render", "docs/plan.md"}))
 
 
 class ChangeDetection(unittest.TestCase):

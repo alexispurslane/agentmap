@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 from agentmap import mcp
 from agentmap.components import app, page
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
+from agentmap.t3 import anchors
 from agentmap.treemap import Cell, build_cells, code_weights
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -119,18 +120,28 @@ class Dashboard:
 
 
 class CellCache:
-    """The treemap cells of the project, built again every `every` seconds."""
+    """The project's files, listed again every `every` seconds.
+
+    It keeps two views of the list: the treemap cells, and the anchors that
+    T3Reader uses to find the project inside other copies of it.
+    """
 
     def __init__(self, root: Path, every: float = 600.0):
         self.root = root
         self.every = every
         self.cells: list[Cell] = []
+        self._anchors: frozenset[str] = frozenset()
 
     def __call__(self) -> list[Cell]:
         return self.cells
 
+    def anchors(self) -> frozenset[str]:
+        return self._anchors
+
     def refresh(self) -> None:
-        self.cells = build_cells(code_weights(self.root), MAP_W, MAP_H)
+        weights = code_weights(self.root)
+        self.cells = build_cells(weights, MAP_W, MAP_H)
+        self._anchors = anchors(weights)
 
     def run(self, stop: threading.Event) -> None:  # pragma: no cover - a timer loop
         while True:
