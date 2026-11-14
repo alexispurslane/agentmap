@@ -391,15 +391,19 @@ class CodeWeightsTest(unittest.TestCase):
         write(self.root, "big.txt", b"x" * 100 + (b"y\n" * 300_000))
         self.assertEqual(code_weights(self.root)["big.txt"], 300_000)
 
-    def test_in_a_git_repository_only_tracked_files_count(self):
+    def test_in_a_git_repository_tracked_and_new_unignored_files_count(self):
+        # An agent's new file shows on the map before anyone commits it.
         self.git("init", "-q")
+        write(self.root, ".gitignore", b"ignored.log\n")
         write(self.root, "tracked.py", b"a\nb\n")
         write(self.root, "dir with space/t.py", b"a\n")
         write(self.root, "untracked.py", b"a\nb\n")
+        write(self.root, "ignored.log", b"a\nb\nc\n")
         write(self.root, "node_modules/kept.js", b"a\n")
         self.git("add", "tracked.py", "dir with space/t.py", "node_modules/kept.js")
         self.assertEqual(code_weights(self.root),
-                         {"tracked.py": 2, "dir with space/t.py": 1, "node_modules/kept.js": 1})
+                         {".gitignore": 1, "tracked.py": 2, "dir with space/t.py": 1,
+                          "untracked.py": 2, "node_modules/kept.js": 1})
 
     def test_tracked_files_missing_from_the_working_tree_are_skipped(self):
         self.git("init", "-q")

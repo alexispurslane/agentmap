@@ -61,7 +61,8 @@ class Cell:
 def code_weights(root: pathlib.Path) -> dict[str, int]:
     """Map each file path, relative to `root` with `/` separators, to its line count.
 
-    In a git repository, the files are those that `git ls-files` lists. Elsewhere,
+    In a git repository, the files are the tracked files plus the new files
+    that git does not ignore. Elsewhere,
     a walk lists them and skips hidden directories and `SKIPPED_DIRS`. A listed
     path that is not a readable file is left out.
     """
@@ -81,7 +82,7 @@ def code_weights(root: pathlib.Path) -> dict[str, int]:
 def _git_files(root):
     try:
         out = subprocess.run(
-            ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=root, capture_output=True, check=True
         ).stdout
     except (OSError, subprocess.CalledProcessError):
         return None

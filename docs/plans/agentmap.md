@@ -227,7 +227,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 
 `Cell` is a frozen dataclass: `Cell(key, label, depth, x, y, w, h, weight)`.
 
-- `code_weights` lists files with `git ls-files -z`. If the root is not a git repository, it walks the tree and skips hidden directories, `node_modules`, `target` and `build`. A file with a NUL byte in its first 8 KiB counts 0 lines.
+- `code_weights` lists files with `git ls-files -z --cached --others --exclude-standard`. Thus a new file that an agent creates shows before anyone commits it. If the root is not a git repository, it walks the tree and skips hidden directories, `node_modules`, `target` and `build`. A file with a NUL byte in its first 8 KiB counts 0 lines.
 - The map has two levels. Level 1 is each top-level directory. All files directly in the root form one cell with the key `.`. Level 2 is each subdirectory of a top-level directory, plus one cell for the files directly in it, with the key `<dir>/.`.
 - Order: in each level, cells are sorted by name. The layout is an ordered strip treemap (Bederson, Shneiderman and Wattenberg, 2002). The method keeps the name order. Thus, when sizes change, a directory stays in about the same place. The method was made for ordered data that changes over time, at tens to thousands of items. Our maps have about 10 to 60 cells, so the method fits.
 - A level-2 cell under 1.5 % of the map area joins one `…` cell in its parent. A level-1 cell under 1.5 % joins one `…` cell at level 1.
