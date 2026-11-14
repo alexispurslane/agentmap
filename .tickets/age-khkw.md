@@ -1,6 +1,6 @@
 ---
 id: age-khkw
-status: open
+status: closed
 deps: [age-jhlg, age-52e1, age-ronp]
 links: []
 created: 2026-11-14T14:48:17Z
