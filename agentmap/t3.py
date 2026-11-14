@@ -36,6 +36,7 @@ creates the item.
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
 import shlex
@@ -190,6 +191,21 @@ class T3Reader:
             if row is None:
                 return None
             return row[0] in self._project_ids()
+
+    def worktrees(self) -> list[str]:
+        """The worktree folders of the project's threads that exist on disk, sorted.
+
+        Every thread of the project that is not deleted counts, whatever its age,
+        archived threads too: an archived thread's worktree can still hold tickets.
+        """
+        with self._lock:
+            ids = self._project_ids()
+            marks = ",".join("?" * len(ids))
+            paths = [r[0] for r in self._conn.execute(
+                "SELECT DISTINCT json_extract(payload_json, '$.worktreePath') AS path"
+                " FROM orchestration_v2_projection_threads"
+                f" WHERE deleted_at IS NULL AND project_id IN ({marks})", ids)]
+        return sorted(p for p in paths if isinstance(p, str) and os.path.isdir(p))
 
     def find_tool_calls(self, tool: str, arguments: dict, now: datetime) -> list[tuple[str, str]]:
         """The active calls of the agentmap tool `tool` with exactly these arguments.

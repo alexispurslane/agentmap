@@ -1226,5 +1226,64 @@ class FindToolCalls(unittest.TestCase):
         self.assertEqual(self.find("get_plan", {}), [])
 
 
+class Worktrees(unittest.TestCase):
+    """worktrees() gives the worktree folders of the project's threads that exist on disk."""
+
+    def setUp(self):
+        self.f = Fixture(self)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = pathlib.Path(tmp.name)
+
+    def folder(self, name):
+        path = self.base / name
+        path.mkdir()
+        return str(path)
+
+    def test_worktrees_are_the_distinct_worktree_folders_of_the_project_threads_sorted(self):
+        b, a = self.folder("b"), self.folder("a")
+        self.f.thread("t1", worktree=b)
+        self.f.thread("t2", worktree=a)
+        self.f.thread("t3", worktree=b)
+        self.assertEqual(self.f.reader(self).worktrees(), [a, b])
+
+    def test_a_thread_of_any_age_gives_its_worktree(self):
+        old = self.folder("old")
+        self.f.thread("t1", worktree=old, created=90 * 24 * 60, updated=60 * 24 * 60)
+        self.assertEqual(self.f.reader(self).worktrees(), [old])
+
+    def test_a_deleted_thread_gives_no_worktree(self):
+        self.f.thread("t1", worktree=self.folder("w"), deleted_at=stamp(5))
+        self.assertEqual(self.f.reader(self).worktrees(), [])
+
+    def test_an_archived_thread_still_gives_its_worktree(self):
+        w = self.folder("w")
+        self.f.thread("t1", worktree=w, archived_at=stamp(5))
+        self.assertEqual(self.f.reader(self).worktrees(), [w])
+
+    def test_a_worktree_that_is_gone_or_is_a_file_is_left_out(self):
+        file = self.base / "file"
+        file.write_text("x")
+        self.f.thread("t1", worktree=str(self.base / "gone"))
+        self.f.thread("t2", worktree=str(file))
+        self.assertEqual(self.f.reader(self).worktrees(), [])
+
+    def test_a_thread_without_a_worktree_gives_none(self):
+        self.f.thread("t1")
+        self.assertEqual(self.f.reader(self).worktrees(), [])
+
+    def test_threads_of_another_project_give_no_worktree(self):
+        self.f.project("p-2", "/work/other")
+        self.f.thread("t1", project_id="p-2", worktree=self.folder("w"))
+        self.assertEqual(self.f.reader(self).worktrees(), [])
+
+    def test_every_project_id_with_the_watched_root_gives_its_worktrees(self):
+        self.f.project("p-2", ROOT)
+        a, b = self.folder("a"), self.folder("b")
+        self.f.thread("t1", worktree=a)
+        self.f.thread("t2", project_id="p-2", worktree=b)
+        self.assertEqual(self.f.reader(self).worktrees(), [a, b])
+
+
 if __name__ == "__main__":
     unittest.main()

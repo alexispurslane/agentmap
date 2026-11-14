@@ -215,7 +215,10 @@ class T3Reader:
     def thread_project(self, thread_id: str) -> bool | None: ...
     def find_tool_calls(self, tool: str, arguments: dict, now: datetime) -> list[tuple[str, str]]: ...
     def events(self, now: datetime) -> list[Event]: ...   # newest first, at most 80
+    def worktrees(self) -> list[str]: ...          # sorted
 ```
+
+`worktrees` gives the distinct `worktreePath` values of the project's threads that are folders on disk. Every thread that is not deleted counts, whatever its age. An archived thread counts too, because its worktree can still hold tickets.
 
 `find_tool_calls` reads `dynamic_tool` items with the status `pending`, `running` or `waiting`. It keeps an item when all of these are true:
 
@@ -368,6 +371,18 @@ data: elements ...
 
   Each line of the HTML gets its own `data: elements ` prefix. The message ends with an empty line.
 - A stream with no news for 15 seconds gets a comment line `: ping`.
+
+### tickets.py and markdown.py: points that ticket-bar.md leaves open
+
+`docs/plans/ticket-bar.md` gives the interface. These points were decided when the modules were built (2026-11-14):
+
+- Hand-edited ticket files hold fenced blocks with a whole older ticket in them, with its own `## Notes` and timestamp lines. So the notes start at the first `## Notes` line outside a fenced block, and only a `**<ISO time>**` line outside a fenced block starts a note. A bold line that is not a time, such as `**2026-11-12, the build**`, stays in the note's text.
+- Text in the notes section before the first timestamp is not a note. It stays at the end of the body, under its `## Notes` heading. Notes are sorted by time, oldest first.
+- Defaults: a missing `status` is `open`, a missing `type` is `task`, and a ticket without a `# title` line takes its id as title. A priority outside 0 to 4 is 2. A list value without brackets is one item.
+- "No epic" holds every ticket whose parent chain ends at itself and that has no descendants. This includes a ticket whose parent is missing. Its `closed` is the number of closed tickets of that kind.
+- Order ties: a ticket or root without `created` comes after the dated ones. The last key is the id. When two files of an id have the same `changed_at`, the earlier folder of the list wins, then the first file name.
+- `TicketStore` reads only `*.md` regular files. It keys each file by its modification time and its size. A file that it cannot read is left out of the cache, so the next rescan tries it again. Each worktree holds a copy of the root's tickets, so the store parses each distinct file text once (an LRU cache of 4096 texts). On the real folder set (58 folders, 34,747 files, 1,051 distinct texts), the first poll takes about 1.5 s, and a warm poll about 7 ms.
+- A link opens in a new tab (`target="_blank" rel="noopener noreferrer"`), so that a click does not leave the dashboard. A link with another scheme shows only its text.
 
 ## Setup in the agent harnesses
 
