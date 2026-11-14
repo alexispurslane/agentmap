@@ -1,6 +1,6 @@
 ---
 id: age-jhlg
-status: open
+status: closed
 deps: [age-y86m]
 links: []
 created: 2026-11-14T14:48:16Z
