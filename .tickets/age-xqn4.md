@@ -1,6 +1,6 @@
 ---
 id: age-xqn4
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-14T17:20:17Z

@@ -206,9 +206,9 @@ class TemplateTest(unittest.TestCase):
 
 class PageTest(unittest.TestCase):
     def test_the_page_opens_the_stream_and_declares_the_hover_signal_on_body(self):
-        html = page('<main id="app"></main>')
+        html = page('<main id="app"></main>', "", "")
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals:hover=\"''\"", body)
+        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: ''}\"", body)
         self.assertIn("data-init=\"@get('/stream', {openWhenHidden: true})\"", body)
         self.assertIn('src="/static/datastar.js"', html)
         self.assertIn('<link rel="stylesheet" href="/static/app.css">', html)
@@ -226,7 +226,7 @@ class PageTest(unittest.TestCase):
 
 class MarkupTest(unittest.TestCase):
     def test_the_app_and_page_are_well_formed_with_no_stray_text(self):
-        for html in (scene(), render([]), render([thread("t")], cells=[]), page(scene())):
+        for html in (scene(), render([]), render([thread("t")], cells=[]), page(scene(), "", "")):
             self.assertEqual(check(html).errors, [])
 
     def test_every_class_in_the_markup_has_a_style(self):
@@ -274,7 +274,7 @@ class CarriedOverTest(unittest.TestCase):
         self.assertEqual(places, sorted(places))
 
     def test_the_page_has_a_title(self):
-        self.assertIn("<title>agentmap</title>", page(""))
+        self.assertIn("<title>agentmap</title>", page("", "", ""))
 
     def test_the_highlight_class_has_a_style_for_each_linked_mark(self):
         for selector in (".dot.hl", ".row.hl", ".ev.hl"):

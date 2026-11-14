@@ -62,9 +62,9 @@ def text(id_="t-1", *, title="A title", body="", notes="", **fields):
     return "\n".join(lines) + "\n"
 
 
-def ticket(id_, status="open", *, parent=None, deps=(), priority=2, created=0):
+def ticket(id_, status="open", *, parent=None, deps=(), priority=2, created=0, type="task"):
     """A Ticket made directly; `created` is in hours after T0, or None."""
-    return Ticket(id=id_, title=f"Title {id_}", status=status, type="task", priority=priority,
+    return Ticket(id=id_, title=f"Title {id_}", status=status, type=type, priority=priority,
                   tags=(), deps=tuple(deps), parent=parent,
                   created=None if created is None else T0 + timedelta(hours=created),
                   changed_at=T0, body="", notes=())
@@ -675,86 +675,95 @@ class StoreInvariants(StoreTest):
         self.polled().check_invariants()
 
 
+def epic(id_, status="open", **kw):
+    return ticket(id_, status, type="epic", **kw)
+
+
 class Groups(unittest.TestCase):
-    def test_a_group_holds_every_open_descendant_of_a_top_ancestor(self):
-        tickets = by_id(ticket("epic"), ticket("child", "in_progress", parent="epic"),
-                        ticket("grandchild", parent="child"))
+    """Each ticket belongs to the group of its nearest ancestor of type epic."""
+
+    def test_a_group_holds_the_open_tickets_below_an_epic_through_tasks(self):
+        tickets = by_id(epic("e"), ticket("task", parent="e"),
+                        ticket("sub", "in_progress", parent="task"))
         [group] = groups(tickets)
-        self.assertEqual(group.root.id, "epic")
-        self.assertEqual({t.id for t in group.members}, {"child", "grandchild"})
+        self.assertEqual(group.root.id, "e")
+        self.assertEqual({t.id for t in group.members}, {"task", "sub"})
+
+    def test_an_inner_epic_is_a_member_of_its_parent_and_heads_its_own_group(self):
+        tickets = by_id(epic("outer", created=1), epic("inner", "in_progress", parent="outer", created=2),
+                        ticket("work", "in_progress", parent="inner"),
+                        ticket("near", parent="outer"))
+        result = {g.root.id: [t.id for t in g.members] for g in groups(tickets)}
+        self.assertEqual(result, {"outer": ["inner", "near"], "inner": ["work"]})
+
+    def test_an_inner_epic_without_work_in_progress_shows_only_in_its_parent(self):
+        tickets = by_id(epic("outer"), epic("inner", parent="outer"),
+                        ticket("work", parent="inner"), ticket("x", "in_progress", parent="outer"))
+        self.assertEqual([g.root.id for g in groups(tickets)], ["outer"])
 
     def test_the_root_is_not_a_member_of_its_own_group(self):
-        [group] = groups(by_id(ticket("epic", "in_progress"),
-                               ticket("child", "in_progress", parent="epic")))
+        [group] = groups(by_id(epic("e", "in_progress"), ticket("child", "in_progress", parent="e")))
         self.assertEqual([t.id for t in group.members], ["child"])
 
-    def test_closed_descendants_are_counted_not_listed(self):
-        [group] = groups(by_id(ticket("epic"), ticket("a", "in_progress", parent="epic"),
-                               ticket("b", "closed", parent="epic"),
+    def test_closed_tickets_of_the_group_are_counted_not_listed(self):
+        [group] = groups(by_id(epic("e"), ticket("a", "in_progress", parent="e"),
+                               ticket("b", "closed", parent="e"),
                                ticket("c", "closed", parent="b")))
         self.assertEqual(([t.id for t in group.members], group.closed), (["a"], 2))
 
     def test_a_closed_root_does_not_count_as_closed_in_its_group(self):
-        [group] = groups(by_id(ticket("epic", "closed"),
-                               ticket("a", "in_progress", parent="epic")))
-        self.assertEqual((group.root.id, group.closed), ("epic", 0))
+        [group] = groups(by_id(epic("e", "closed"), ticket("a", "in_progress", parent="e")))
+        self.assertEqual((group.root.id, group.closed), ("e", 0))
 
     def test_only_groups_with_a_member_in_progress_are_given(self):
-        tickets = by_id(ticket("e1"), ticket("a", parent="e1"),
-                        ticket("e2"), ticket("b", "in_progress", parent="e2"),
-                        ticket("e3", "in_progress"), ticket("c", "closed", parent="e3"))
+        tickets = by_id(epic("e1"), ticket("a", parent="e1"),
+                        epic("e2"), ticket("b", "in_progress", parent="e2"),
+                        epic("e3", "in_progress"), ticket("c", "closed", parent="e3"))
         self.assertEqual([g.root.id for g in groups(tickets)], ["e2"])
 
-    def test_tickets_without_parent_or_children_form_the_no_epic_group_last(self):
+    def test_tickets_without_an_epic_above_them_form_the_no_epic_group_last(self):
         tickets = by_id(ticket("loose", "in_progress", created=-10),
                         ticket("done", "closed"),
-                        ticket("epic", created=5), ticket("a", "in_progress", parent="epic"))
+                        ticket("task", created=-5), ticket("sub", parent="task"),
+                        epic("e", created=5), ticket("a", "in_progress", parent="e"))
         result = groups(tickets)
-        self.assertEqual([g.root.id if g.root else None for g in result], ["epic", None])
-        self.assertEqual(result[1], Group(None, (tickets["loose"],), 1))
+        self.assertEqual([g.root.id if g.root else None for g in result], ["e", None])
+        self.assertEqual(result[1], Group(None, (tickets["loose"], tickets["task"], tickets["sub"]), 1))
+
+    def test_an_epic_without_an_epic_above_it_is_in_no_group(self):
+        result = groups(by_id(epic("e"), ticket("loose", "in_progress")))
+        self.assertEqual([[t.id for t in g.members] for g in result], [["loose"]])
 
     def test_a_no_epic_group_without_work_in_progress_is_not_given(self):
         self.assertEqual(groups(by_id(ticket("loose"))), [])
 
-    def test_a_ticket_whose_parent_is_missing_counts_as_a_ticket_without_a_parent(self):
+    def test_a_ticket_whose_parent_is_missing_has_no_epic_above_it(self):
         [group] = groups(by_id(ticket("orphan", "in_progress", parent="gone")))
         self.assertIsNone(group.root)
         self.assertEqual([t.id for t in group.members], ["orphan"])
 
-    def test_a_ticket_with_a_missing_parent_and_children_heads_a_group(self):
-        [group] = groups(by_id(ticket("mid", parent="gone"),
-                               ticket("a", "in_progress", parent="mid")))
-        self.assertEqual(group.root.id, "mid")
-
-    def test_a_parent_cycle_ends_at_the_last_ticket_before_it_repeats(self):
-        tickets = by_id(ticket("x", "in_progress", parent="y"),
-                        ticket("y", "in_progress", parent="x"))
-        result = groups(tickets)
-        self.assertEqual({(g.root.id, g.members[0].id) for g in result},
-                         {("y", "x"), ("x", "y")})
-
-    def test_a_chain_that_runs_into_a_cycle_above_the_ticket_ends(self):
-        tickets = by_id(ticket("a", "in_progress", parent="b"), ticket("b", parent="c"),
-                        ticket("c", parent="b"))
-        self.assertIn(("c", ("a", "b")),
-                      {(g.root.id, tuple(t.id for t in g.members)) for g in groups(tickets)})
+    def test_a_parent_cycle_stops_the_search_for_an_epic(self):
+        tickets = by_id(ticket("x", "in_progress", parent="y"), epic("y", parent="x"),
+                        ticket("p", "in_progress", parent="q"), ticket("q", parent="p"))
+        result = {g.root.id if g.root else None: [t.id for t in g.members] for g in groups(tickets)}
+        self.assertEqual(result, {"y": ["x"], None: ["p", "q"]})
 
     def test_groups_come_in_order_of_their_roots_creation_oldest_first(self):
-        tickets = by_id(ticket("new", created=5), ticket("a", "in_progress", parent="new"),
-                        ticket("old", created=1), ticket("b", "in_progress", parent="old"),
-                        ticket("undated", created=None),
+        tickets = by_id(epic("new", created=5), ticket("a", "in_progress", parent="new"),
+                        epic("old", created=1), ticket("b", "in_progress", parent="old"),
+                        epic("undated", created=None),
                         ticket("c", "in_progress", parent="undated"))
         self.assertEqual([g.root.id for g in groups(tickets)], ["old", "new", "undated"])
 
     def test_groups_with_roots_of_the_same_time_come_in_order_of_root_id(self):
-        tickets = by_id(ticket("r2"), ticket("a", "in_progress", parent="r2"),
-                        ticket("r1"), ticket("b", "in_progress", parent="r1"))
+        tickets = by_id(epic("r2"), ticket("a", "in_progress", parent="r2"),
+                        epic("r1"), ticket("b", "in_progress", parent="r1"))
         self.assertEqual([g.root.id for g in groups(tickets)], ["r1", "r2"])
 
 
 class MemberOrder(unittest.TestCase):
     def order(self, *members):
-        tickets = by_id(ticket("epic"), *members)
+        tickets = by_id(epic("epic"), *members)
         [group] = groups(tickets)
         return [t.id for t in group.members]
 

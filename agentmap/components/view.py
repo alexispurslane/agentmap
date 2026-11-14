@@ -7,12 +7,15 @@ result.
 from __future__ import annotations
 
 import hashlib
+import re
+from collections.abc import Collection, Mapping
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
+from agentmap.tickets import Group, Ticket, blocked_by
 
 # Each thread gets its own OKLCH hue. In order of creation, each hue is the
 # one before plus the golden angle, so threads close in that order get hues
@@ -167,3 +170,42 @@ def summary(thread: AgentThread, status: Status | None) -> Summary | None:
     oldest = datetime.min.replace(tzinfo=thread.created_at.tzinfo)
     # max() keeps the first of equal keys, so the order above breaks ties.
     return max(sources, key=lambda s: s.at or oldest)
+
+
+# A word that can be a ticket id: letters, digits, `_` and `-`, starting with a letter or digit.
+_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+
+
+def ticket_agents(forest: Forest, statuses: Mapping[str, Status],
+                  ids: Collection[str]) -> dict[str, list[str]]:
+    """For each ticket id, the shown threads that work on it, in tag order.
+
+    A thread works on a ticket if its title or its status line names the
+    ticket's id as a whole word.
+    """
+    links: dict[str, list[str]] = {}
+    for t in forest.walk():
+        text = t.title + " " + (statuses[t.id].text if t.id in statuses else "")
+        for word in dict.fromkeys(w.rstrip("-_") for w in _WORD.findall(text)):
+            if word in ids:
+                links.setdefault(word, []).append(t.id)
+    return links
+
+
+def group_key(group: Group) -> str:
+    """The id of the group's root ticket, or "" for the group of tickets without an epic."""
+    return group.root.id if group.root else ""
+
+
+def group_threads(group: Group, links: Mapping[str, list[str]], forest: Forest) -> list[str]:
+    """The threads that work on the group's root or on any member, in tag order."""
+    ids = {t for ticket in ([group.root] if group.root else []) + list(group.members)
+           for t in links.get(ticket.id, [])}
+    return [t.id for t in forest.walk() if t.id in ids]
+
+
+def ticket_state(ticket: Ticket, tickets: Mapping[str, Ticket]) -> str:
+    """"in_progress", "blocked" (a dependency is not closed) or "ready"."""
+    if ticket.status == "in_progress":
+        return "in_progress"
+    return "blocked" if blocked_by(ticket, tickets) else "ready"

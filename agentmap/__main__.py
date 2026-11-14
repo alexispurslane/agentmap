@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,8 +13,11 @@ from agentmap.caller import CallerFinder
 from agentmap.server import CellCache, Dashboard, make_server
 from agentmap.status import StatusStore
 from agentmap.t3 import T3Reader
+from agentmap.tickets import TicketStore
 
 DEFAULT_DB = Path.home() / ".t3" / "userdata" / "statev2.sqlite"
+# How often the ticket folders are checked for changes, in seconds.
+TICKET_POLL_SECONDS = 2.0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -43,14 +47,27 @@ def main(argv: list[str] | None = None) -> int:
     cells.refresh()
     reader = T3Reader(args.t3_db, root, timedelta(hours=args.hours), anchors=cells.anchors)
     store = StatusStore(root / ".agentmap" / "status.jsonl")
+    # The project root comes first: the ticket store reads it on every poll.
+    tickets = TicketStore(lambda: [root / ".tickets",
+                                   *(Path(w) / ".tickets" for w in reader.worktrees()),
+                                   *sorted(root.glob(".claude/worktrees/*/.tickets"))])
+    tickets.poll()
     # Codex threads share one process and send no thread header. The finder
     # names their thread from T3 Code's record of the call.
     find_caller = CallerFinder(
         lambda tool, arguments: reader.find_tool_calls(tool, arguments, datetime.now(timezone.utc)))
-    dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller)
+    dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller, tickets=tickets)
     server = make_server(dashboard, "127.0.0.1", args.port)
     stop = threading.Event()
-    for target in (cells.run, dashboard.run):
+    def poll_tickets(stop: threading.Event) -> None:  # pragma: no cover - a timer loop
+        while not stop.wait(TICKET_POLL_SECONDS):
+            try:
+                if tickets.poll():
+                    dashboard.wake.set()
+            except Exception:
+                traceback.print_exc()
+
+    for target in (cells.run, dashboard.run, poll_tickets):
         threading.Thread(target=target, args=(stop,), daemon=True).start()
     port = server.server_address[1]
     print(f"agentmap: watching {root}\n"

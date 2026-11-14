@@ -336,39 +336,42 @@ def blocked_by(ticket: Ticket, tickets: Mapping[str, Ticket]) -> tuple[str, ...]
 def groups(tickets: Mapping[str, Ticket]) -> list[Group]:
     """The active groups: those with at least one member in progress.
 
+    Each ticket belongs to the group of its nearest ancestor of type epic. An
+    inner epic is thus a member of its parent epic's group, and it heads its
+    own group too. A ticket that is not an epic and has no epic above it
+    belongs to "No epic". An epic with no epic above it belongs to no group.
+
     Groups come in order of their root's `created`, oldest first (a root without
-    it last, ties by root id), and "No epic" comes last. A ticket whose parent
-    chain ends at itself and that has no descendants belongs to "No epic".
+    it last, ties by root id), and "No epic" comes last.
     """
-    tops = {tid: _top(t, tickets) for tid, t in tickets.items()}
-    heads = {top for tid, top in tops.items() if top != tid}
     found: dict[str | None, list[Ticket]] = {}
-    for tid, t in tickets.items():
-        if tops[tid] != tid:
-            found.setdefault(tops[tid], []).append(t)
-        elif tid not in heads:  # Without parent and children: "No epic".
-            found.setdefault(None, []).append(t)
+    for t in tickets.values():
+        epic = _epic_above(t, tickets)
+        if epic is not None or t.type != "epic":
+            found.setdefault(epic, []).append(t)
     result = []
-    for root, descendants in found.items():
-        members = [t for t in descendants if t.status != "closed"]
+    for root, belonging in found.items():
+        members = [t for t in belonging if t.status != "closed"]
         if any(t.status == "in_progress" for t in members):
             members.sort(key=lambda t: _member_key(t, tickets))
             result.append(Group(tickets[root] if root is not None else None, tuple(members),
-                                len(descendants) - len(members)))
+                                len(belonging) - len(members)))
     result.sort(key=lambda g: (g.root is None, _dated(g.root) if g.root else ()))
     return result
 
 
-def _top(ticket: Ticket, tickets: Mapping[str, Ticket]) -> str:
-    """The id of the top ancestor: the last ticket of the parent chain that exists.
+def _epic_above(ticket: Ticket, tickets: Mapping[str, Ticket]) -> str | None:
+    """The id of the nearest ancestor of type epic, or None.
 
-    A chain with a cycle ends at the last ticket before the chain repeats.
+    The search ends at a missing parent, or where the parent chain repeats.
     """
     seen = {ticket.id}
     while ticket.parent in tickets and ticket.parent not in seen:
         ticket = tickets[ticket.parent]
+        if ticket.type == "epic":
+            return ticket.id
         seen.add(ticket.id)
-    return ticket.id
+    return None
 
 
 def _member_key(t: Ticket, tickets: Mapping[str, Ticket]) -> tuple:

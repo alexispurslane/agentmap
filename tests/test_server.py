@@ -10,8 +10,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agentmap.components.view import element_id
 from agentmap.server import CellCache, Dashboard, make_server, sse_patch
 from agentmap.status import StatusStore
+from agentmap.tickets import Ticket
 from agentmap.t3 import AgentThread, Touch
 from agentmap.treemap import Cell
 
@@ -53,6 +55,19 @@ class Clock:
         return self.t
 
 
+class FakeTickets:
+    def __init__(self, tickets=()):
+        self.by_id = {t.id: t for t in tickets}
+
+    def tickets(self):
+        return dict(self.by_id)
+
+
+def ticket(id, status="in_progress", parent=None, title=None, body="", type="task"):
+    return Ticket(id=id, title=title or f"Title of {id}", status=status, type=type, priority=2,
+                  tags=(), deps=(), parent=parent, created=T0, changed_at=T0, body=body, notes=())
+
+
 def make_dashboard(tmp, threads=(), **kw):
     reader = FakeReader(list(threads))
     store = StatusStore(Path(tmp) / "status.jsonl")
@@ -62,6 +77,14 @@ def make_dashboard(tmp, threads=(), **kw):
 
 
 class SseTest(unittest.TestCase):
+    def test_a_patch_can_name_a_selector_and_a_mode(self):
+        self.assertEqual(
+            sse_patch("<p>x</p>", selector="#tb-t-1", mode="inner"),
+            b"event: datastar-patch-elements\n"
+            b"data: selector #tb-t-1\n"
+            b"data: mode inner\n"
+            b"data: elements <p>x</p>\n\n")
+
     def test_each_html_line_gets_its_own_elements_data_line(self):
         self.assertEqual(
             sse_patch("<main id=\"app\">\n<p>x</p></main>"),
@@ -137,9 +160,18 @@ class HubTest(unittest.TestCase):
             waiter = threading.Thread(target=lambda: got.append(dash.hub.wait(version, 5)))
             waiter.start()
             time.sleep(0.05)
-            dash.hub.publish("<main id=\"app\">new</main>")
+            dash.hub.publish({"app": "<main id=\"app\">new</main>"})
             waiter.join(2)
-            self.assertEqual(got[0], (version + 1, "<main id=\"app\">new</main>"))
+            self.assertEqual(got[0][0], version + 1)
+            self.assertEqual(got[0][1]["app"], "<main id=\"app\">new</main>")
+
+    def test_a_publish_with_the_same_fragments_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dash, *_ = make_dashboard(tmp)
+            dash.tick()
+            version = dash.hub.version
+            self.assertFalse(dash.hub.publish(dict(dash.hub.fragments)))
+            self.assertEqual(dash.hub.version, version)
 
     def test_a_wait_times_out_with_the_same_version(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -224,13 +256,14 @@ class HttpTest(unittest.TestCase):
         sock = self.open_stream()
         buf = self.read_until(sock, b": ping\n\n", limit=3)
         sock.close()
-        after_first_event = buf.split(b"\n\n", 1)[1]
-        self.assertTrue(after_first_event.startswith(b": ping\n\n"), after_first_event[:40])
+        # The stream starts with one event per fragment: app, tickets, epics.
+        after_the_fragments = buf.split(b"\n\n", 3)[3]
+        self.assertTrue(after_the_fragments.startswith(b": ping\n\n"), after_the_fragments[:40])
 
     def test_the_stream_sends_each_version_once(self):
         sock = self.open_stream()
-        self.read_until(sock, b"\n\n")
-        self.dash.hub.publish('<main id="app">second</main>')
+        self.read_until(sock, b'<section id="epics"')
+        self.dash.hub.publish({"app": '<main id="app">second</main>'})
         buf = self.read_until(sock, b": ping\n\n", limit=3)
         sock.close()
         self.assertEqual(buf.count(b"event: datastar-patch-elements"), 1)
@@ -358,6 +391,80 @@ class CellCacheTest(unittest.TestCase):
             self.assertEqual(cache.anchors(), frozenset())
             cache.refresh()
             self.assertEqual(cache.anchors(), frozenset({"lib/deep"}))
+
+
+class TicketFragmentTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.tickets = FakeTickets([ticket("ep", "open", type="epic"), ticket("ep-1", parent="ep", body="Hello **there**.")])
+        self.dash, self.reader, self.store, self.clock = make_dashboard(
+            self.tmp.name, [thread("t1", "ep-1: build")], tickets=self.tickets, ping_every=0.2)
+
+    def test_a_tick_publishes_the_epic_strip_and_the_ticket_lists(self):
+        self.assertTrue(self.dash.tick())
+        self.assertIn("Title of ep", self.dash.hub.fragments["epics"])
+        self.assertIn("Title of ep-1", self.dash.hub.fragments["tickets"])
+
+    def test_a_ticket_change_publishes_new_ticket_fragments(self):
+        self.dash.tick()
+        self.tickets.by_id["ep-1"] = ticket("ep-1", parent="ep", title="Renamed")
+        self.assertTrue(self.dash.tick())
+        self.assertIn("Renamed", self.dash.hub.fragments["tickets"])
+
+    def test_without_a_ticket_source_the_fragments_are_empty_shells(self):
+        dash, *_ = make_dashboard(self.tmp.name)
+        dash.tick()
+        self.assertIn('<section id="epics" class="mod">', dash.hub.fragments["epics"])
+        self.assertTrue(dash.hub.fragments["tickets"].startswith('<div id="tickets">'))
+
+    def serve(self):
+        self.dash.tick()
+        server = make_server(self.dash, "127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def get(self, port, path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        return resp, data
+
+    def test_the_page_holds_all_three_fragments(self):
+        _, data = self.get(self.serve(), "/")
+        for marker in (b'<main id="app">', b'<div id="tickets">', b'<section id="epics"'):
+            self.assertIn(marker, data)
+
+    def test_the_ticket_route_patches_the_rendered_text_into_the_rows_box(self):
+        resp, data = self.get(self.serve(), "/ticket/ep-1")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.getheader("Content-Type"), "text/event-stream")
+        self.assertIn(f"data: selector #tb-{element_id('t', 'ep-1')}\ndata: mode inner\n".encode(), data)
+        self.assertIn(b"Hello <strong>there</strong>.", data)
+
+    def test_an_unknown_ticket_gets_404(self):
+        resp, _ = self.get(self.serve(), "/ticket/nothing")
+        self.assertEqual(resp.status, 404)
+
+    def test_a_stream_sends_all_fragments_then_only_the_changed_ones(self):
+        port = self.serve()
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        self.addCleanup(sock.close)
+        sock.sendall(b"GET /stream HTTP/1.1\r\nHost: x\r\n\r\n")
+        buf = b""
+        while buf.count(b"event: datastar-patch-elements") < 3:
+            buf += sock.recv(65536)
+        self.tickets.by_id["ep-1"] = ticket("ep-1", parent="ep", title="Renamed")
+        self.dash.tick()
+        later = b""
+        while b"Renamed" not in later or not later.endswith(b"\n\n"):
+            later += sock.recv(65536)
+        self.assertNotIn(b'<main id="app">', later)
+        self.assertIn(b'<div id="tickets">', later)
 
 
 class PageBeforeFirstTickTest(unittest.TestCase):

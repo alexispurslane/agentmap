@@ -13,8 +13,8 @@ The user decided these points on 2026-11-14:
 
 - Ticket: one `.tickets/<id>.md` file that `tk` writes. It has a front matter block, a `# title` line, a body, and an optional `## Notes` section.
 - Ticket folder: a `.tickets` folder in the project root or in one of its worktrees.
-- Group: a top ancestor in the `parent` chain and all its descendants. Tickets without a parent and without children form one group without a root, shown as "No epic".
-- Member: a descendant of a group's root that is not closed. The root is not a member of its own group.
+- Group: an epic (the group's root) and the tickets whose nearest ancestor of type `epic` is that epic. An inner epic is a member of its parent epic's group, and it heads its own group too. Tickets that are not epics and have no epic above them form one group without a root, shown as "No epic".
+- Member: a ticket of a group that is not closed. The root is not a member of its own group.
 - Active group: a group with at least one member in progress.
 - Ready ticket: a ticket whose dependencies are all closed or unknown. A blocked ticket has at least one dependency that is open or in progress.
 
@@ -93,7 +93,8 @@ def blocked_by(ticket: Ticket, tickets: Mapping[str, Ticket]) -> tuple[str, ...]
 - `parse_ticket` returns None for a file without front matter or without an `id`.
 - `TicketStore.poll` stats every ticket folder. It rescans a folder whose modification time moved, the first folder (the project root) on every poll, and the next `per_poll` other folders in turn. A rescan reads only the files whose modification time moved. For each id, the ticket with the newest `changed_at` wins. A ticket whose last file disappears drops out.
 - `groups` orders the members: in progress, then ready, then blocked. Within each part, it orders by priority, then by `created`. It orders the groups by the root's `created`, oldest first, so that columns keep their places. The "No epic" group comes last.
-- A parent chain with a cycle or a missing parent ends at the last ticket that exists.
+- The search for an epic above a ticket ends at a missing parent, or where the parent chain repeats.
+- The first design grouped tickets by their top ancestor. On tertius, that folded every ticket in progress into one epic with 122 unfinished tickets, because all work nests under `ter-89xq`. The nearest epic gives one column per epic that has work in progress.
 
 ## agentmap/markdown.py
 
@@ -108,14 +109,15 @@ def render(text: str) -> str: ...   # HTML, safe to insert
 
 ## Agents and tickets
 
-If a thread's title names a ticket's id, the thread works on that ticket. A group shows the tags of the threads that work on any of its members. The rule lives in `components/view.py`.
+If a thread's title or its current status line names a ticket's id, the thread works on that ticket. The MCP instructions ask agents to start their status line with the ticket id. A group shows the tags of the threads that work on any of its members. The rule lives in `components/view.py`.
 
 ## Page and stream
 
 - The `<body>` holds three fragments: `#app` (rail, map, agent tree, event log), `#epics` (the bottom strip) and `#tickets` (the ticket lists). The server patches each one by its id. If a fragment's HTML did not change, the server does not send it.
 - `#app` and `#mid` use `display: contents`, so all parts share one page grid. `#tickets` sits in the grid cell of the event log.
 - Signals on `<body>`: `hover`, `epic` (the open group's root id, or `''`) and `ticket` (the open ticket's id, or `''`). A click on an epic column sets `$epic`. A click on a ticket row toggles `$ticket`. The event log shows while `$epic` is `''`.
-- `#tickets` holds one list per active group, each shown only while `$epic` names it. If the open group is no longer active, a note in `#tickets` says so.
+- `#tickets` holds one list per active group, each shown only while `$epic` names it.
+- A ticket's rendered text loads on click, because the unfinished tickets of one tertius epic hold 434 KiB of text. The row holds an empty `<div id="tb-<id>" data-ignore-morph>`. A click toggles `$ticket` and sends `@get('/ticket/<id>')`. The answer patches that box with mode `inner`, which keeps the box's own attribute. Datastar keeps an element during a morph if the old and the new element both have `data-ignore-morph`, so a later patch of `#tickets` keeps the loaded text. A text that changes while it is open shows the change at the next click. If the open group is no longer active, a note in `#tickets` says so.
 
 ## Removed
 

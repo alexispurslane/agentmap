@@ -19,12 +19,14 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from agentmap import mcp
-from agentmap.components import app, page
+from agentmap.components import app, epic_strip, page, ticket_body, ticket_lists
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
+from agentmap.components.view import Forest, element_id, ticket_agents
 from agentmap.t3 import anchors
+from agentmap.tickets import groups
 from agentmap.treemap import Cell, build_cells, code_weights
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -34,39 +36,58 @@ STATIC = {
 }
 MAX_BODY = 1024 * 1024
 POLL_SECONDS = 0.25
-EMPTY_APP = '<main id="app"></main>'
+EMPTY = {
+    "app": '<main id="app"></main>',
+    "tickets": '<div id="tickets"></div>',
+    "epics": '<section id="epics" class="mod"></section>',
+}
 
 
-def sse_patch(html: str) -> bytes:
-    """One Datastar `patch-elements` event that replaces the element with the same id."""
+def sse_patch(html: str, selector: str | None = None, mode: str | None = None) -> bytes:
+    """One Datastar `patch-elements` event.
+
+    Without a selector, it morphs the element with the same id. With a
+    selector and the mode "inner", it morphs the children of that element.
+    """
     lines = html.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    head = (f"data: selector {selector}\n" if selector else "") + (f"data: mode {mode}\n" if mode else "")
     data = "".join(f"data: elements {line}\n" for line in lines)
-    return f"event: datastar-patch-elements\n{data}\n".encode()
+    return f"event: datastar-patch-elements\n{head}{data}\n".encode()
 
 
 class Hub:
-    """The newest app HTML, with a version that grows by one on each change."""
+    """The newest HTML of each page fragment, with a version that grows by one on each change.
+
+    The fragments are "app", "tickets" and "epics". A stream keeps what it
+    sent and patches only the fragments that differ.
+    """
 
     def __init__(self):
         self._cond = threading.Condition()
         self.version = 0
-        self.html = ""
+        self.fragments: dict[str, str] = {}
 
-    def publish(self, html: str) -> bool:
-        """Store the HTML and wake all waiters. False if the HTML did not change."""
+    @property
+    def html(self) -> str:
+        """The app fragment."""
+        return self.fragments.get("app", "")
+
+    def publish(self, fragments: dict[str, str]) -> bool:
+        """Store the fragments and wake all waiters. False if none of them changed."""
         with self._cond:
-            if html == self.html:
+            merged = {**self.fragments, **fragments}
+            if merged == self.fragments:
                 return False
-            self.html = html
+            self.fragments = merged
             self.version += 1
             self._cond.notify_all()
             return True
 
-    def wait(self, version: int, timeout: float) -> tuple[int, str]:
+    def wait(self, version: int, timeout: float) -> tuple[int, dict[str, str]]:
         """Wait until the version differs from `version`, or until the timeout."""
         with self._cond:
             self._cond.wait_for(lambda: self.version != version, timeout)
-            return self.version, self.html
+            return self.version, dict(self.fragments)
 
 
 class Dashboard:
@@ -75,8 +96,9 @@ class Dashboard:
     def __init__(self, reader, store, cells: Callable[[], list[Cell]], project_name: str, *,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  refresh: float = 15.0, ping_every: float = 15.0,
-                 find_caller: Callable[[str, dict], str] | None = None):
+                 find_caller: Callable[[str, dict], str] | None = None, tickets=None):
         self.reader = reader
+        self.tickets = tickets
         self.store = store
         self.cells = cells
         self.project_name = project_name
@@ -89,6 +111,8 @@ class Dashboard:
         self._last_render: datetime | None = None
         self._last_statuses = None
         self._last_cells = None
+        self._last_tickets = None
+        self._last_ticket_key = None
 
     def tick(self) -> bool:
         """Render again if anything changed or the refresh interval passed.
@@ -99,14 +123,27 @@ class Dashboard:
         db_changed = self.reader.changed()
         statuses = self.store.statuses()
         cells = self.cells()
+        tickets = self.tickets.tickets() if self.tickets is not None else {}
         due = self._last_render is None or now - self._last_render >= self.refresh
-        if not (db_changed or due or statuses != self._last_statuses or cells != self._last_cells):
+        if not (db_changed or due or statuses != self._last_statuses or cells != self._last_cells
+                or tickets != self._last_tickets):
             return False
         # The event log merges T3 Code's history with the status log's history.
         events = self.reader.events(now) + self.store.events()
-        html = app(self.reader.snapshot(now), statuses, cells, events, now, self.project_name)
+        threads = self.reader.snapshot(now)
+        fragments = {"app": app(threads, statuses, cells, events, now, self.project_name)}
+        forest = Forest(threads)
+        links = ticket_agents(forest, statuses, tickets.keys())
+        # The ticket fragments are large, so they render again only when the
+        # tickets, the threads that work on them, or the ages may have changed.
+        key = (links, {t: (forest.tag[t], forest.hue[t]) for ids in links.values() for t in ids})
+        if tickets != self._last_tickets or key != self._last_ticket_key or due:
+            found = groups(tickets)
+            fragments["epics"] = epic_strip(found, tickets, links, forest, now)
+            fragments["tickets"] = ticket_lists(found, tickets, links, forest, now)
         self._last_render, self._last_statuses, self._last_cells = now, statuses, cells
-        return self.hub.publish(html)
+        self._last_tickets, self._last_ticket_key = tickets, key
+        return self.hub.publish(fragments)
 
     def run(self, stop: threading.Event) -> None:
         """The poller loop. An MCP call sets `wake` for a render without delay."""
@@ -163,8 +200,11 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == "/":
-            self._send(200, page(self.dashboard.hub.html or EMPTY_APP).encode(),
+            f = {**EMPTY, **self.dashboard.hub.fragments}
+            self._send(200, page(f["app"], f["epics"], f["tickets"]).encode(),
                        {"Content-Type": "text/html; charset=utf-8"})
+        elif path.startswith("/ticket/"):
+            self._ticket(unquote(path[len("/ticket/"):]))
         elif path == "/stream":
             self._stream()
         elif path.startswith("/static/") and path[len("/static/"):] in STATIC:
@@ -217,21 +257,35 @@ class _Handler(BaseHTTPRequestHandler):
     def _error(self, status: int, text: str, extra: dict[str, str] | None = None) -> None:
         self._send(status, f"{text}\n".encode(), {"Content-Type": "text/plain", **(extra or {})})
 
+    def _ticket(self, ticket_id: str) -> None:
+        """The rendered text of one ticket, as an inner patch of its row's text box."""
+        source = self.dashboard.tickets
+        found = source.tickets().get(ticket_id) if source is not None else None
+        if found is None:
+            self._error(404, "no such ticket")
+            return
+        box = "#tb-" + element_id("t", ticket_id)
+        self._send(200, sse_patch(ticket_body(found), selector=box, mode="inner"),
+                   {"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
+
     def _stream(self) -> None:
         hub = self.dashboard.hub
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        version, html = hub.version, hub.html
+        version, sent = hub.version, {**EMPTY, **hub.fragments}
         try:
-            self.wfile.write(sse_patch(html or EMPTY_APP))
+            # The page order: a fragment patches the element with its id.
+            self.wfile.write(b"".join(sse_patch(html) for html in sent.values()))
             self.wfile.flush()
             while True:
-                new, html = hub.wait(version, self.dashboard.ping_every)
-                self.wfile.write(sse_patch(html) if new != version else b": ping\n\n")
+                new, fragments = hub.wait(version, self.dashboard.ping_every)
+                changed = [html for name, html in fragments.items() if sent.get(name) != html]
+                self.wfile.write(b"".join(sse_patch(html) for html in changed) or b": ping\n\n")
                 self.wfile.flush()
                 version = new
+                sent.update(fragments)
         except OSError:
             return  # the page closed the stream
 
