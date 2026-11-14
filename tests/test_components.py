@@ -719,11 +719,12 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def peek_lines(html):
-    """(path, age, tags) of each file line of a cell box."""
+def peek_lines(html, part="edits"):
+    """(path, age or size, tags) of each line of one list of a cell box: "edits" or "heavy"."""
+    m = re.search(rf'<ul class="cf-list {part}">(.*?)</ul>', html)
     return [(p, a, re.findall(r'class="tag"[^>]*>([^<]+)</span>', t)) for p, a, t in re.findall(
         r'<li class="cf"><span class="cf-path">([^<]*)</span><span class="cf-age">([^<]*)</span>'
-        r'<span class="cf-tags">(.*?)</span></li>', html)]
+        r'<span class="cf-tags">(.*?)</span></li>', m.group(1) if m else "")]
 
 
 class CellPeekTest(unittest.TestCase):
@@ -779,22 +780,35 @@ class CellPeekTest(unittest.TestCase):
                    "src/a/x1.py": 500, "src/a/x2.py": 300, "src/a/x3.py": 200,
                    "src/a/logo.png": 0, "src/b/huge.py": 99_999, "docs/huge.md": 99_999}
         html = cell_peek("src/a", CELLS, self.forest, [], NOW, weights=weights)
-        self.assertIn('<p class="empty">No agent edited a file here in the event window. '
-                      'The largest files by compressed size:</p>', html)
-        self.assertEqual(peek_lines(html), [("big.py", "12.3 kB", []), ("deep/mid.py", "900 B", []),
+        self.assertIn('<p class="empty">No agent edited a file here in the event window.</p>', html)
+        self.assertIn('<h4 class="cf-head">Largest files by compressed size</h4>', html)
+        self.assertEqual(peek_lines(html, "heavy"), [("big.py", "12.3 kB", []), ("deep/mid.py", "900 B", []),
                                             ("x1.py", "500 B", []), ("x2.py", "300 B", []),
                                             ("x3.py", "200 B", [])])
 
     def test_a_directory_cell_without_edits_lists_the_files_of_its_subdirectories(self):
         weights = {"src/a/x.py": 10, "src/b/y.py": 20, "docs/z.md": 30}
         html = cell_peek("src", CELLS, self.forest, [], NOW, weights=weights)
-        self.assertEqual([p for p, *_ in peek_lines(html)], ["b/y.py", "a/x.py"])
+        self.assertEqual([p for p, *_ in peek_lines(html, "heavy")], ["b/y.py", "a/x.py"])
 
-    def test_a_cell_with_edits_lists_only_the_edits(self):
+    def test_a_cell_with_edits_lists_its_heaviest_files_below_them(self):
         html = cell_peek("src/a", CELLS, self.forest, [event("t", "edits", 2, "src/a/x.py")], NOW,
                          weights={"src/a/big.py": 99_999, "src/a/x.py": 1})
         self.assertEqual([p for p, *_ in peek_lines(html)], ["x.py"])
-        self.assertNotIn("largest", html)
+        self.assertEqual([p for p, *_ in peek_lines(html, "heavy")], ["big.py", "x.py"])
+        self.assertNotIn("No agent edited", html)
+        self.assertLess(html.index('class="cf-list edits"'), html.index('class="cf-head"'))
+        self.assertLess(html.index('class="cf-head"'), html.index('class="cf-list heavy"'))
+
+    def test_a_pinned_box_also_lists_five_heaviest_files(self):
+        weights = {f"src/a/f{i}.py": 100 + i for i in range(9)}
+        html = cell_peek("src/a", CELLS, self.forest, [], NOW, pinned=True, weights=weights)
+        self.assertEqual(len(peek_lines(html, "heavy")), 5)
+
+    def test_a_cell_without_weighed_files_has_no_size_list(self):
+        html = cell_peek("src/a", CELLS, self.forest, [event("t", "edits", 2, "src/a/x.py")], NOW)
+        self.assertNotIn("cf-head", html)
+        self.assertNotIn("cf-list heavy", html)
 
     def test_each_kind_of_cell_has_a_title_and_shows_paths_inside_its_folder(self):
         cells = [Cell("src", "src", 1, 0, 0, 500, 600, 1), Cell("src/.", ".", 2, 0, 16, 200, 584, 1),

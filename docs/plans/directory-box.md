@@ -24,7 +24,8 @@ If `locate` gives a cell for the file's path, the file is in that cell. If `loca
 - Each line is one file: its path inside the cell's directory, the age of its newest edit, and the tags of the threads that edited it, newest editor first.
 - The newest file comes first. A hover box shows 8 files. A pinned box shows 40 files and scrolls.
 - The data are the `edits` events of the event log. A thread that is not in the snapshot has no tag, and its edits do not show.
-- A cell without edits says "No agent edited a file here in the event window." Then it lists its 5 heaviest files, with their map weight in place of an age. The map weight is the gzip size, with prose at a quarter and data at a half. Binary files weigh 0 and do not show.
+- Below the edits, after a rule and the heading "Largest files by compressed size", every box lists the 5 heaviest files of the cell, with their map weight in place of an age. The map weight is the gzip size, with prose at a quarter and data at a half. Binary files weigh 0 and do not show. A file can show in both lists.
+- A cell without edits says "No agent edited a file here in the event window." above that list.
 
 ## The anchor
 
