@@ -6,16 +6,107 @@
 
 :root {
   color-scheme: light;
-  --ground: #ffffff;
-  --panel: #f3f3f2;
-  --rule: #cfcfcd;
-  --rule-soft: #e4e4e2;
-  --ink: #141414;
-  --red: #d7000f;
+  --ground: #ffffff; /* page and module ground */
+  --panel: #f3f3f2; /* module heads, tier heads */
+  --map: #fafaf9; /* the map's ground */
+  --hover: #fafaf9; /* a hovered row or column */
+  --busy: #ffffff; /* a map cell where an agent works */
+  --rule: #cfcfcd; /* module borders */
+  --rule-soft: #e4e4e2; /* row dividers */
+  --rule-dir: #a9a9a6; /* dividers between map directories */
+  --control: #c4c4c2; /* borders of badges and labels */
+  --control-hover: #777777;
+  --scroll: #b9b9b6; /* scrollbar thumbs */
+  --ink: #141414; /* text */
+  --ink-2: #333333;
+  --muted: #555555; /* secondary text */
+  --muted-2: #666666;
+  --label: #6b6b6b;
+  --faint: #737373; /* meta text, still 4.5:1 or more */
+  --label-2: #8a8a8a;
+  --fainter: #8f8f8f; /* marks older than an hour */
+  --fade-ink: #949494; /* the ink that faded text mixes toward */
+  --on-fill: #ffffff; /* text on red and tag fills */
+  --red: #d7000f; /* red text and red marks */
+  --red-fill: #d7000f; /* red grounds with white text */
   --red-soft: #fff1f1;
-  --ok: #0b7a37;
+  --ok: #0b7a37; /* working */
+  --dot-failed: #6b0008;
+  --dot-idle-ink: #2e2e2e;
+  --shadow: rgb(0 0 0 / .2);
+  --shadow-dot: rgb(0 0 0 / .25);
+  --ask: rgb(215 0 15 / .6); /* the pulse of an agent that needs you */
+  --ask-0: rgb(215 0 15 / 0);
+  --age-0: #141414; /* the ink ramp a0..a4 */
+  --age-1: #2e2e2e;
+  --age-2: #555555;
+  --age-3: #737373;
+  --age-4: #8f8f8f;
+  --h-tag: .56 .17; /* oklch lightness and chroma of an agent's color: tags and dots */
+  --h-now: .56 .17; /* the newest route segment */
+  --h-route: .6 .16; /* older route segments and stops */
+  --h-accent: .56 .17; /* accent bars and borders of lit marks */
+  --h-row: .97 .025; /* the ground of a lit row */
+  --h-chip: .93 .05; /* the ground of a lit chip or ticket */
+  --h-cell: .95 .04; /* the ground of a lit map cell */
+  --h-label: .42 .14; /* the label of a lit parent cell */
+  --h-idle: .86 .05; /* an idle dot */
+  --tag-fade-l: .08; /* how far a tag's lightness moves as it fades */
   --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
   --mono: "SF Mono", Menlo, ui-monospace, monospace;
+}
+
+/* The dark theme, outside the light hours of the local clock (see components/page).
+   A deep warm gray, not black, with warm off-white ink: every text pair keeps
+   4.5:1 or more, and agent colors keep their hues. */
+:root:has(body.dark) {
+  color-scheme: dark;
+  --ground: #25282c;
+  --panel: #2f3337;
+  --map: #2a2d31;
+  --hover: #33373c;
+  --busy: #363a3f;
+  --rule: #4d5258;
+  --rule-soft: #3c4046;
+  --rule-dir: #686d74;
+  --control: #5a5f66;
+  --control-hover: #8a8f96;
+  --scroll: #5a5f66;
+  --ink: #f2f0ec;
+  --ink-2: #dcdad5;
+  --muted: #bdbab4;
+  --muted-2: #b5b2ac;
+  --label: #aeaba5;
+  --faint: #a6a39d;
+  --label-2: #9b9893;
+  --fainter: #94918c;
+  --fade-ink: #86847f;
+  --on-fill: #ffffff;
+  --red: #ff6259;
+  --red-fill: #c8201a;
+  --red-soft: #3b2326;
+  --ok: #5ccf86;
+  --dot-failed: #a3262b;
+  --dot-idle-ink: #ecebe7;
+  --shadow: rgb(0 0 0 / .6);
+  --shadow-dot: rgb(0 0 0 / .6);
+  --ask: rgb(255 98 89 / .6);
+  --ask-0: rgb(255 98 89 / 0);
+  --age-0: #f2f0ec;
+  --age-1: #d8d6d1;
+  --age-2: #b3b0aa;
+  --age-3: #a09d97;
+  --age-4: #8a8783;
+  --h-tag: .56 .17;
+  --h-now: .74 .15;
+  --h-route: .70 .14;
+  --h-accent: .72 .15;
+  --h-row: .30 .04;
+  --h-chip: .37 .06;
+  --h-cell: .31 .05;
+  --h-label: .82 .12;
+  --h-idle: .42 .06;
+  --tag-fade-l: -.14;
 }
 
 /* Real-time fading. A mark's --fade goes from 0 (just now) to 1 (an hour
@@ -26,17 +117,17 @@
 
 /* The ink ramp. Every step but the last keeps text at 4.5:1 or more on white;
    the last marks facts older than an hour. */
-.a0 { --age-ink: #141414; --age-line: 1; }
-.a1 { --age-ink: #2e2e2e; --age-line: .72; }
-.a2 { --age-ink: #555555; --age-line: .48; }
-.a3 { --age-ink: #737373; --age-line: .3; }
-.a4 { --age-ink: #8f8f8f; --age-line: .16; }
+.a0 { --age-ink: var(--age-0); --age-line: 1; }
+.a1 { --age-ink: var(--age-1); --age-line: .72; }
+.a2 { --age-ink: var(--age-2); --age-line: .48; }
+.a3 { --age-ink: var(--age-3); --age-line: .3; }
+.a4 { --age-ink: var(--age-4); --age-line: .16; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--ground); color: var(--ink); }
 body { font: 17px/1.4 var(--sans); -webkit-font-smoothing: antialiased; }
-::selection { background: var(--red); color: #fff; }
-* { scrollbar-width: thin; scrollbar-color: #b9b9b6 transparent; }
+::selection { background: var(--red-fill); color: var(--on-fill); }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
 
 /* One page grid. The three fragments that the server patches apart (#app,
    #tickets, #epics) and the middle band use display: contents, so all their
@@ -57,15 +148,15 @@ body {
 #rail { display: flex; align-items: stretch; height: 58px; border-bottom: 3px solid var(--red); }
 #rail h1 {
   margin: 0; display: flex; align-items: center; padding: 0 22px;
-  background: var(--red); color: #fff; font-size: 27px; font-weight: 700; letter-spacing: .01em;
+  background: var(--red-fill); color: var(--on-fill); font-size: 27px; font-weight: 700; letter-spacing: .01em;
 }
 .count { display: flex; align-items: center; gap: 8px; padding: 0 18px; border-right: 1px solid var(--rule-soft); font-weight: 600; font-size: 17px; }
 .count b { font-variant-numeric: tabular-nums; font-size: 20px; }
 .count.working { color: var(--ok); }
-.count.idle { color: #555555; }
+.count.idle { color: var(--muted); }
 .count.needs-you { background: var(--red-soft); color: var(--red); }
 .count.failed { color: var(--red); }
-.count.none { color: #8f8f8f; font-weight: 400; }
+.count.none { color: var(--fainter); font-weight: 400; }
 #rail time { margin-left: auto; display: flex; align-items: center; padding: 0 16px; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Modules */
@@ -76,12 +167,12 @@ body {
   font-size: 15px; font-weight: 700;
 }
 .mod > h2::before { content: ""; align-self: stretch; width: 6px; background: var(--red); }
-.mod > h2 small { margin-left: auto; font-size: 13px; font-weight: 400; color: #666; }
+.mod > h2 small { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--muted-2); }
 .scroll { overflow-y: auto; min-height: 0; flex: 1; }
-.empty { margin: 14px; color: #737373; }
+.empty { margin: 14px; color: var(--faint); }
 
 /* Map */
-.map-box { position: relative; width: 100%; aspect-ratio: 1080 / 600; background: #fafaf9; }
+.map-box { position: relative; width: 100%; aspect-ratio: 1080 / 600; background: var(--map); }
 /* Each divider is drawn once: a cell draws only its left and top lines, and
    only where it has a neighbor (line-l, line-t; see project_map). The other
    borders are transparent, and the background stops inside them, so that a
@@ -90,38 +181,38 @@ body {
 .cell { position: absolute; border: 1px solid transparent; background-clip: padding-box; }
 .cell.line-l { border-left-color: var(--rule-soft); }
 .cell.line-t { border-top-color: var(--rule-soft); }
-.cell.d1.line-l { border-left-color: #a9a9a6; }
-.cell.d1.line-t { border-top-color: #a9a9a6; }
+.cell.d1.line-l { border-left-color: var(--rule-dir); }
+.cell.d1.line-t { border-top-color: var(--rule-dir); }
 /* A directory's label fits its 16 px band (treemap.LABEL_INSET). */
-.cell .label { position: absolute; left: 5px; top: 1px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 14px; font-weight: 600; color: #6b6b6b; white-space: nowrap; }
-.cell.d2 .label { top: 3px; font-weight: 400; font-size: 12px; line-height: 14px; color: #8a8a8a; }
-.cell.busy { background-color: #fff; }
+.cell .label { position: absolute; left: 5px; top: 1px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 14px; font-weight: 600; color: var(--label); white-space: nowrap; }
+.cell.d2 .label { top: 3px; font-weight: 400; font-size: 12px; line-height: 14px; color: var(--label-2); }
+.cell.busy { background-color: var(--busy); }
 .cell { cursor: pointer; }
 /* A lit cell takes the focus hue. A parent lies under its subdirectory cells,
    so only its label lights. */
-.cell.hl:not(.parent) { background-color: oklch(.95 .04 var(--focus-hue)); }
-.cell.parent.hl > .label { color: oklch(.42 .14 var(--focus-hue)); }
+.cell.hl:not(.parent) { background-color: oklch(var(--h-cell) var(--focus-hue)); }
+.cell.parent.hl > .label { color: oklch(var(--h-label) var(--focus-hue)); }
 .cell.pinned > .label { color: var(--ink); }
 .routes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 /* --fade squared is the age over an hour, so a route segment loses opacity at a
    steady rate and is gone after an hour. */
-.route { fill: none; stroke: oklch(.6 .16 var(--hue)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); }
-.route.now { stroke: oklch(.56 .17 var(--hue)); stroke-opacity: calc(1 - var(--fade) * var(--fade)); }
-.stop { fill: #fff; stroke: oklch(.6 .16 var(--hue)); stroke-width: 3; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); fill-opacity: calc(1 - var(--fade) * var(--fade)); }
+.route { fill: none; stroke: oklch(var(--h-route) var(--hue)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); }
+.route.now { stroke: oklch(var(--h-now) var(--hue)); stroke-opacity: calc(1 - var(--fade) * var(--fade)); }
+.stop { fill: var(--ground); stroke: oklch(var(--h-route) var(--hue)); stroke-width: 3; stroke-opacity: calc(.9 * (1 - var(--fade) * var(--fade))); fill-opacity: calc(1 - var(--fade) * var(--fade)); }
 .routes g.hl .route, .routes g.hl .stop { stroke-opacity: 1; fill-opacity: 1; }
 .routes g.hl .route { stroke-width: 7; }
 .dot {
   position: absolute; transform: translate(-50%, -50%);
   font: 700 14px/1 var(--sans); padding: 4px 7px; border-radius: 3px;
-  background: oklch(.56 .17 var(--hue)); color: #fff;
-  box-shadow: 0 0 0 2px #fff, 0 1px 3px rgb(0 0 0 / .25);
+  background: oklch(var(--h-tag) var(--hue)); color: var(--on-fill);
+  box-shadow: 0 0 0 2px var(--ground), 0 1px 3px var(--shadow-dot);
   transition: transform .12s ease-out;
 }
-.dot.idle { background: oklch(.86 .05 var(--hue)); color: #2e2e2e; }
-.dot.failed { background: #6b0008; }
-.dot.needs-you { background: var(--red); animation: ask 1.4s ease-out infinite; }
-.dot.hl { transform: translate(-50%, -50%) scale(1.3); z-index: 2; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
-@keyframes ask { 0% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgb(215 0 15 / .6); } 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 12px rgb(215 0 15 / 0); } }
+.dot.idle { background: oklch(var(--h-idle) var(--hue)); color: var(--dot-idle-ink); }
+.dot.failed { background: var(--dot-failed); }
+.dot.needs-you { background: var(--red-fill); animation: ask 1.4s ease-out infinite; }
+.dot.hl { transform: translate(-50%, -50%) scale(1.3); z-index: 2; box-shadow: 0 0 0 2px var(--ground), 0 0 0 4px var(--ink); }
+@keyframes ask { 0% { box-shadow: 0 0 0 2px var(--ground), 0 0 0 2px var(--ask); } 100% { box-shadow: 0 0 0 2px var(--ground), 0 0 0 12px var(--ask-0); } }
 @media (prefers-reduced-motion: reduce) { .dot.needs-you { animation: none; } .dot { transition: none; } }
 
 /* Middle band: agent tree and event log */
@@ -129,7 +220,7 @@ body {
 .tag {
   display: inline-block; min-width: 34px; text-align: center; flex: none;
   font: 700 14px/22px var(--sans); padding: 0 6px; border-radius: 3px;
-  background: oklch(.56 .17 var(--hue)); color: #fff;
+  background: oklch(var(--h-tag) var(--hue)); color: var(--on-fill);
 }
 
 .row {
@@ -138,29 +229,29 @@ body {
 }
 /* Ticket badges sit in a fixed slot between the title and the state. */
 .tkbs { display: flex; gap: 4px; align-self: start; margin-top: 2px; }
-.tkb { all: unset; cursor: pointer; font: 600 12.5px/20px var(--mono); padding: 0 6px; border: 1px solid #c4c4c2; border-radius: 3px; color: #333; background: var(--ground); white-space: nowrap; }
-.tkb:hover { border-color: #777; }
-.tkb.hl { background: oklch(.93 .05 var(--focus-hue)); border-color: oklch(.56 .17 var(--focus-hue)); }
-.tkb.pinned { background: var(--ink); border-color: var(--ink); color: #fff; }
+.tkb { all: unset; cursor: pointer; font: 600 12.5px/20px var(--mono); padding: 0 6px; border: 1px solid var(--control); border-radius: 3px; color: var(--ink-2); background: var(--ground); white-space: nowrap; }
+.tkb:hover { border-color: var(--control-hover); }
+.tkb.hl { background: oklch(var(--h-chip) var(--focus-hue)); border-color: oklch(var(--h-accent) var(--focus-hue)); }
+.tkb.pinned { background: var(--ink); border-color: var(--ink); color: var(--ground); }
 .tkb:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
-.row > .tag { align-self: start; margin-top: 2px; background: oklch(calc(.56 + .08 * var(--fade)) calc(.17 - .07 * var(--fade)) var(--hue)); }
-.row .title { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
+.row > .tag { align-self: start; margin-top: 2px; background: oklch(calc(.56 + var(--tag-fade-l) * var(--fade)) calc(.17 - .07 * var(--fade)) var(--hue)); }
+.row .title { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), var(--fade-ink) calc(var(--fade) * 100%)); }
 .row .state { font-size: 14px; font-weight: 700; color: var(--ok); white-space: nowrap; }
-.row.idle .state { color: #737373; font-weight: 400; }
-.row.failed .state, .row.needs-you .state { color: #fff; background: var(--red); padding: 0 8px; border-radius: 2px; }
+.row.idle .state { color: var(--faint); font-weight: 400; }
+.row.failed .state, .row.needs-you .state { color: var(--on-fill); background: var(--red-fill); padding: 0 8px; border-radius: 2px; }
 .row .line { grid-column: 2 / 5; display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .lbl {
-  font-size: 11px; font-weight: 700; color: #6b6b6b; text-align: center;
-  border: 1px solid #c4c4c2; border-radius: 2px; line-height: 16px; letter-spacing: .02em;
+  font-size: 11px; font-weight: 700; color: var(--label); text-align: center;
+  border: 1px solid var(--control); border-radius: 2px; line-height: 16px; letter-spacing: .02em;
 }
 .line.tool .lbl { color: var(--ok); border-color: currentColor; }
-.line .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
+.line .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), var(--fade-ink) calc(var(--fade) * 100%)); }
 .line.tool .text { font: 15px var(--mono); color: var(--ink); }
 .line.thought .text { font-style: italic; }
-.row .meta { grid-column: 2 / 5; font-size: 13px; color: #737373; }
+.row .meta { grid-column: 2 / 5; font-size: 13px; color: var(--faint); }
 .row.compact { padding-top: 5px; padding-bottom: 5px; }
 .row.compact .title { font-size: 15px; font-weight: 400; }
-.row.hl { background: oklch(.97 .025 var(--hue)); box-shadow: inset 3px 0 0 oklch(.56 .17 var(--hue)); }
+.row.hl { background: oklch(var(--h-row) var(--hue)); box-shadow: inset 3px 0 0 oklch(var(--h-accent) var(--hue)); }
 .kids { grid-column: 1 / 5; margin: 6px -10px -9px 22px; border-left: 1px solid var(--rule); }
 .kids > .row:last-child { border-bottom: 0; }
 
@@ -177,8 +268,8 @@ body {
 .ev.asks .verb, .ev.failed .verb { color: var(--red); }
 .ev.finished .verb { color: var(--ok); }
 .ev .path { font: 13.5px var(--mono); }
-.ev .more { color: #737373; }
-.ev.hl { background: oklch(.97 .025 var(--hue)); }
+.ev .more { color: var(--faint); }
+.ev.hl { background: oklch(var(--h-row) var(--hue)); }
 
 /* Epic strip: one column per epic with a ticket in progress, side by side.
    Each column takes a third of the panel; more than three scroll sideways. */
@@ -187,23 +278,23 @@ body {
   all: unset; box-sizing: border-box; flex: 0 0 calc(100% / 3); min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden;
   padding: 10px 12px; border-right: 1px solid var(--rule); cursor: pointer; color: var(--age-ink);
 }
-.epic:hover { background: #fafaf9; }
-.epic.hl { background: oklch(.97 .025 var(--focus-hue)); box-shadow: inset 0 -4px 0 oklch(.56 .17 var(--focus-hue)); }
-.now-item.hl { background: oklch(.93 .05 var(--focus-hue)); }
+.epic:hover { background: var(--hover); }
+.epic.hl { background: oklch(var(--h-row) var(--focus-hue)); box-shadow: inset 0 -4px 0 oklch(var(--h-accent) var(--focus-hue)); }
+.now-item.hl { background: oklch(var(--h-chip) var(--focus-hue)); }
 .epic.sel { background: var(--red-soft); box-shadow: inset 0 4px 0 var(--red); }
 .epic:focus-visible, .tk-head:focus-visible, .close:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .ep-head { display: flex; gap: 8px; align-items: baseline; }
-.ep-id, .tk-id { font: 600 13px var(--mono); color: #555; white-space: nowrap; }
+.ep-id, .tk-id { font: 600 13px var(--mono); color: var(--muted); white-space: nowrap; }
 .prio { font-size: 11.5px; font-weight: 700; padding: 0 4px; border: 1px solid currentColor; border-radius: 2px; line-height: 16px; }
 .prio.p0, .prio.p1 { color: var(--red); }
-.prio.p2 { color: #555; }
-.prio.p3, .prio.p4 { color: #8f8f8f; }
-.changed { margin-left: auto; font-size: 12px; color: #737373; white-space: nowrap; }
+.prio.p2 { color: var(--muted); }
+.prio.p3, .prio.p4 { color: var(--fainter); }
+.changed { margin-left: auto; font-size: 12px; color: var(--faint); white-space: nowrap; }
 .ep-title { font-weight: 700; font-size: 17px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; flex: none; }
 .bar { display: flex; height: 6px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; flex: none; }
-.bar .done { background: #555; }
+.bar .done { background: var(--muted); }
 .bar .active { background: var(--red); }
-.counts { font-size: 13px; color: #555; flex: none; }
+.counts { font-size: 13px; color: var(--muted); flex: none; }
 .counts b { color: var(--red); }
 .agents { display: flex; gap: 3px; flex-wrap: wrap; }
 .ep-now { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; font-size: 13px; color: var(--ink); }
@@ -211,42 +302,42 @@ body {
 .now-item .tk-id { font-size: 12px; }
 .now-item .tag { font-size: 11px; line-height: 16px; min-width: 24px; }
 .now-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-.now-more { color: #737373; }
+.now-more { color: var(--faint); }
 .agents .tag, .tk-meta .tag { font-size: 11.5px; line-height: 18px; min-width: 28px; }
-.tags { font-size: 12px; color: #737373; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: none; }
+.tags { font-size: 12px; color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: none; }
 
 /* Ticket list, in the event log's place while an epic is open */
 .tickets > h2 { min-width: 0; }
 .tickets > h2 small { white-space: nowrap; }
 .list-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-.close { all: unset; margin-left: 4px; padding: 0 6px; cursor: pointer; font-size: 16px; color: #555; }
+.close { all: unset; margin-left: 4px; padding: 0 6px; cursor: pointer; font-size: 16px; color: var(--muted); }
 .close:hover { color: var(--red); }
 .tk { border-bottom: 1px solid var(--rule-soft); color: var(--age-ink); }
 .tk-head { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 10px; cursor: pointer; }
-.tk-head:hover { background: #fafaf9; }
-.tk-head.hl { background: oklch(.97 .025 var(--focus-hue)); box-shadow: inset 3px 0 0 oklch(.56 .17 var(--focus-hue)); }
+.tk-head:hover { background: var(--hover); }
+.tk-head.hl { background: oklch(var(--h-row) var(--focus-hue)); box-shadow: inset 3px 0 0 oklch(var(--h-accent) var(--focus-hue)); }
 .tk-head.pinned { background: var(--panel); }
 .tk-title { font-weight: 700; font-size: 15px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.type { font-size: 12px; color: #737373; }
+.type { font-size: 12px; color: var(--faint); }
 .mark { width: 10px; height: 10px; flex: none; align-self: center; border: 1.5px solid currentColor; border-radius: 2px; }
 .tk.agent .mark { color: var(--red); background: var(--red); }
 .tk.recent .mark { color: var(--red); background: linear-gradient(90deg, var(--red) 50%, transparent 50%); }
-.tk.stale .mark { color: #8f8f8f; background: linear-gradient(90deg, #8f8f8f 50%, transparent 50%); }
+.tk.stale .mark { color: var(--fainter); background: linear-gradient(90deg, var(--fainter) 50%, transparent 50%); }
 /* Tiers run from the bottom up, so the most relevant ticket sits next to the
    epic strip, and the list opens scrolled to its bottom. */
 .tiers { display: flex; flex-direction: column-reverse; }
 .tier-head {
   margin: 0; padding: 3px 10px; position: sticky; top: 0; z-index: 1;
   font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-  color: #666; background: var(--panel); border-bottom: 1px solid var(--rule-soft);
+  color: var(--muted-2); background: var(--panel); border-bottom: 1px solid var(--rule-soft);
 }
 .tier.agent .tier-head { color: var(--red); }
-.fold { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 6px 10px; cursor: pointer; font-size: 13px; color: #666; border-bottom: 1px dashed var(--rule); }
+.fold { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 6px 10px; cursor: pointer; font-size: 13px; color: var(--muted-2); border-bottom: 1px dashed var(--rule); }
 .fold::before { content: "▸ "; }
-.fold:hover { background: #fafaf9; color: var(--ink); }
+.fold:hover { background: var(--hover); color: var(--ink); }
 .fold:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
-.tk-path { font: 12px var(--mono); color: #737373; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tk.blocked .mark { color: #8f8f8f; border-style: dashed; }
+.tk-path { font: 12px var(--mono); color: var(--faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tk.blocked .mark { color: var(--fainter); border-style: dashed; }
 .tk-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: center; font-size: 12.5px; }
 .blockers { color: var(--red); }
 .notes { color: var(--age-ink); }
@@ -259,7 +350,7 @@ body {
 .md pre code { padding: 0; background: none; }
 .md a { color: var(--red); }
 .note { border-top: 1px dashed var(--rule); margin-top: 10px; padding-top: 6px; }
-.note time { font: 600 12px var(--mono); color: #737373; }
+.note time { font: 600 12px var(--mono); color: var(--faint); }
 
 /* Hover box: a ticket's title and description beside the hovered ticket, as
    on Wikipedia. The element under the pointer is the CSS anchor: a ticket can
@@ -278,8 +369,8 @@ body {
   position-try-fallbacks: flip-block, flip-inline;
   margin: 6px 0; width: 540px; max-width: calc(100vw - 16px); max-height: 460px; overflow: hidden; z-index: 10;
   padding: 10px 14px 28px; background: var(--ground); border: 1px solid var(--rule); border-top: 4px solid var(--red);
-  box-shadow: 0 8px 28px rgb(0 0 0 / .2); pointer-events: none;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  box-shadow: 0 8px 28px var(--shadow); pointer-events: none;
+  mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
   visibility: hidden; opacity: 0;
 }
 .peek.open { visibility: visible; opacity: 1; transition: opacity .12s .35s, visibility 0s linear .35s; }
@@ -296,7 +387,7 @@ body {
 .cf-list { list-style: none; margin: 0; padding: 0; }
 .cf { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--rule-soft); }
 .cf-path { font: 14px/1.35 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cf-age { font-size: 13px; color: #737373; }
+.cf-age { font-size: 13px; color: var(--faint); }
 .cf-tags { display: flex; gap: 3px; }
 .cf-tags .tag { font-size: 11px; line-height: 16px; min-width: 24px; }
 @media (prefers-reduced-motion: reduce) { .peek, .peek.open { transition: none; } }

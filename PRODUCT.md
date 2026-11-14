@@ -8,7 +8,7 @@ web
 
 ## Users
 
-One developer who runs many Claude Code and Codex agent threads at once in T3 Code, on one project. The developer works on the main monitor and keeps agentmap open on a portrait side monitor of about 1080 × 1920 CSS pixels. The room has bright daylight during most work.
+One developer who runs many Claude Code and Codex agent threads at once in T3 Code, on one project. The developer works on the main monitor and keeps agentmap open on a portrait side monitor of about 1080 × 1920 CSS pixels. The room has bright daylight during most work. In the evening, the board turns to a dark theme by the local clock: a warm dusk gray with the same clarity and contrast, so it does not glare in a dim room.
 
 The developer uses the dashboard in two ways, equally often:
 

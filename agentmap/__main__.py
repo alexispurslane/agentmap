@@ -29,7 +29,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help=f"T3 Code state database (default {DEFAULT_DB})")
     p.add_argument("--hours", type=float, default=3.0,
                    help="show threads active in the last N hours (default 3)")
-    return p.parse_args(argv)
+    p.add_argument("--light-from", type=int, default=7,
+                   help="local hour when the board turns light (default 7)")
+    p.add_argument("--dark-from", type=int, default=19,
+                   help="local hour when the board turns dark (default 19)")
+    args = p.parse_args(argv)
+    if not 0 <= args.light_from < args.dark_from <= 24:
+        p.error("--light-from and --dark-from must satisfy 0 <= light < dark <= 24")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     find_caller = CallerFinder(
         lambda tool, arguments: reader.find_tool_calls(tool, arguments, datetime.now(timezone.utc)))
     dashboard = Dashboard(reader, store, cells, root.name, find_caller=find_caller, tickets=tickets,
-                          weights=cells.weights)
+                          weights=cells.weights, day_hours=(args.light_from, args.dark_from))
     server = make_server(dashboard, "127.0.0.1", args.port)
     stop = threading.Event()
     def poll_tickets(stop: threading.Event) -> None:  # pragma: no cover - a timer loop

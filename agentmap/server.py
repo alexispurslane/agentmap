@@ -24,6 +24,7 @@ from urllib.parse import unquote, urlsplit
 
 from agentmap import mcp
 from agentmap.components import app, cell_peek, epic_strip, page, ticket_lists, ticket_peek
+from agentmap.components.page.page import is_dark
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.view import Forest, active_groups, ticket_agents
 from agentmap.t3 import anchors
@@ -97,10 +98,12 @@ class Dashboard:
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  refresh: float = 15.0, ping_every: float = 15.0,
                  find_caller: Callable[[str, dict], str] | None = None, tickets=None,
-                 weights: Callable[[], Mapping[str, int]] = dict):
+                 weights: Callable[[], Mapping[str, int]] = dict, day_hours: tuple[int, int] = (7, 19)):
         self.reader = reader
         # The map's weight of each file, for the box of a cell without edits.
         self.weights = weights
+        # (light_from, dark_from): the local hours of the light theme; see page.is_dark.
+        self.day_hours = day_hours
         self.tickets = tickets
         self.store = store
         self.cells = cells
@@ -215,7 +218,9 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/":
             f = {**EMPTY, **self.dashboard.hub.fragments}
-            self._send(200, page(f["app"], f["epics"], f["tickets"]).encode(),
+            hours = self.dashboard.day_hours
+            dark = is_dark(self.dashboard.clock().astimezone().hour, hours)
+            self._send(200, page(f["app"], f["epics"], f["tickets"], hours, dark).encode(),
                        {"Content-Type": "text/html; charset=utf-8"})
         elif path.startswith("/peek/"):
             self._box(path[len("/peek/"):], pinned=False)

@@ -288,7 +288,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 ### server.py and `__main__.py`
 
 ```
-python3 -m agentmap --project PATH [--port 7788] [--t3-db PATH] [--hours 3]
+python3 -m agentmap --project PATH [--port 7788] [--t3-db PATH] [--hours 3] [--light-from 7] [--dark-from 19]
 ```
 
 - The server binds `127.0.0.1` only.
@@ -355,3 +355,13 @@ url = "http://127.0.0.1:7788/mcp"
 7. README with the setup steps.
 
 Each module ticket includes the full test process: tests first, then coverage, then mutation testing with mutmut.
+
+## Light and dark themes
+
+User request of 2026-11-14. The board has a light theme and a dark theme, and the local clock picks one.
+
+- The board is light from the hour `--light-from` (default 7) up to the hour `--dark-from` (default 19), and dark the rest of the day. `page.is_dark` holds the rule.
+- The page applies the rule to the browser's local clock with the signal `$now`, which ticks every 10 seconds. The server applies it to its own clock for the first paint, so the page does not show the light theme for a moment at night. The server and the browser run on the same Mac.
+- Every color is a CSS variable in one of two blocks: `:root` for light and `:root:has(body.dark)` for dark. A test makes sure that no other rule holds a color.
+- The dark theme is a warm dusk gray (`#25282c`), not black, with warm off-white ink. Text keeps a contrast of 4.5:1 or more. The two marks that are faint on purpose, the ink of facts older than an hour and the floor of the fade, keep about 4:1, which is more than in the light theme.
+- Agent colors keep their hues in both themes. Each theme sets only the lightness and chroma of tags, routes, tints and accents, as `oklch(var(--h-...) var(--hue))`.

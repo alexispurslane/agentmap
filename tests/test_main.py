@@ -1,3 +1,4 @@
+import contextlib
 """Behavior of the command line."""
 
 import http.client
@@ -20,6 +21,17 @@ class MainTest(unittest.TestCase):
         args = parse_args(["--project", "/tmp"])
         self.assertEqual((args.port, args.hours, args.t3_db), (7788, 3.0, DEFAULT_DB))
         self.assertEqual(DEFAULT_DB, Path.home() / ".t3" / "userdata" / "statev2.sqlite")
+
+    def test_the_board_is_light_from_7_to_19_by_default(self):
+        args = parse_args(["--project", "/tmp"])
+        self.assertEqual((args.light_from, args.dark_from), (7, 19))
+        args = parse_args(["--project", "/tmp", "--light-from", "6", "--dark-from", "21"])
+        self.assertEqual((args.light_from, args.dark_from), (6, 21))
+
+    def test_light_must_start_before_dark_within_the_day(self):
+        for flags in (["--light-from", "19", "--dark-from", "7"], ["--light-from", "-1"], ["--dark-from", "25"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                parse_args(["--project", "/tmp", *flags])
 
     def test_a_missing_project_directory_stops_with_status_2(self):
         err = io.StringIO()

@@ -28,6 +28,8 @@ Options:
 | `--port N` | `7788` | The port on `127.0.0.1`. |
 | `--t3-db PATH` | `~/.t3/userdata/statev2.sqlite` | T3 Code's database. |
 | `--hours H` | `3` | Show the threads that changed in the last `H` hours. |
+| `--light-from H` | `7` | The local hour when the board turns light. |
+| `--dark-from H` | `19` | The local hour when the board turns dark. |
 
 The server listens on `127.0.0.1` only.
 

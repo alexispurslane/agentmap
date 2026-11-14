@@ -490,6 +490,13 @@ class TicketFragmentTest(unittest.TestCase):
         resp, data = self.get(self.serve(), "/peek/c/src")
         self.assertIn(b'<span class="cf-path">a/big.py</span><span class="cf-age">2.0 kB</span>', data)
 
+    def test_the_first_paint_takes_the_theme_of_the_servers_local_hour(self):
+        hour = T0.astimezone().hour
+        for hours, dark in (((0, 24), False), ((hour + 1, 24), True)):
+            self.dash.day_hours = hours
+            _, data = self.get(self.serve(), "/")
+            self.assertEqual(b'<body class="dark"' in data, dark, hours)
+
     def test_an_unknown_cell_or_kind_has_no_box(self):
         port = self.serve()
         for path in ("/peek/c/nowhere", "/pin/c/nowhere", "/peek/x/src", "/peek/src"):

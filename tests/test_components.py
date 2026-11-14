@@ -10,6 +10,7 @@ from agentmap.components import app, page
 from agentmap.components._template import templates
 from agentmap.components.cell_peek.cell_peek import cell_peek
 from agentmap.components.fade.fade import fade
+from agentmap.components.page.page import is_dark
 from agentmap.components.hover.hover import hover
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.tag.tag import tag
@@ -280,6 +281,16 @@ class PageTest(unittest.TestCase):
         self.assertIn('src="/static/datastar.js"', html)
         self.assertIn('<link rel="stylesheet" href="/static/app.css">', html)
         self.assertIn('<main id="app"></main>', html)
+
+    def test_the_page_is_dark_outside_the_light_hours_of_the_local_clock(self):
+        body = re.search(r"<body[^>]*>", page("", "", "", hours=(7, 19))).group(0)
+        self.assertIn('data-class:dark="new Date($now * 1000).getHours() &lt; 7 || '
+                      'new Date($now * 1000).getHours() &gt;= 19"', body)
+        self.assertNotIn('class="dark"', body)
+        self.assertIn('<body class="dark"', page("", "", "", hours=(6, 20), dark=True))
+
+    def test_an_hour_is_dark_before_the_light_starts_and_from_the_dark_on(self):
+        self.assertEqual([h for h in range(24) if is_dark(h, (7, 19))], [0, 1, 2, 3, 4, 5, 6, 19, 20, 21, 22, 23])
 
     def test_the_app_is_one_main_element_with_its_four_parts_in_order(self):
         html = scene()
@@ -831,3 +842,29 @@ class CellLinkTest(unittest.TestCase):
     def test_the_label_of_the_hovered_or_pinned_cell_anchors_the_box(self):
         self.assertIn(".cell:hover > .label { anchor-name: --peek; }", CSS)
         self.assertIn(".cell.pinned > .label { anchor-name: --pin; }", CSS)
+
+
+class ThemeTest(unittest.TestCase):
+    """Every color comes from one block of tokens per theme, so the dark theme covers the page."""
+
+    def blocks(self):
+        light = re.search(r":root \{(.*?)\n\}", CSS, re.S).group(1)
+        dark = re.search(r":root:has\(body\.dark\) \{(.*?)\n\}", CSS, re.S).group(1)
+        return light, dark
+
+    def test_both_themes_define_the_same_tokens(self):
+        light, dark = self.blocks()
+        names = lambda block: set(re.findall(r"(--[a-z0-9-]+):", block))
+        colors = {n for n in names(light) if n not in ("--sans", "--mono")}
+        self.assertTrue(colors)
+        self.assertEqual(colors, names(dark))
+
+    def test_no_rule_outside_the_token_blocks_names_a_color(self):
+        light, dark = self.blocks()
+        rest = CSS.replace(light, "").replace(dark, "")
+        rest = re.sub(r"/\*.*?\*/", "", rest, flags=re.S)
+        self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\boklch\(\s*[.0-9]", rest), [])
+
+    def test_the_dark_theme_tells_the_browser_to_draw_its_own_parts_dark(self):
+        _, dark = self.blocks()
+        self.assertIn("color-scheme: dark;", dark)
