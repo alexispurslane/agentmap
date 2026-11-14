@@ -43,7 +43,7 @@ The T3 reader already maps a path in another checkout to the project by path anc
 
 ## Ticket badges on agent rows
 
-- An agent row shows a badge for each ticket that its title names, in a fixed place before the state.
+- An agent row shows a badge for each ticket that its title or its status line names, in a fixed place before the state. These are the same tickets that its focus lights.
 - The title drops the ids that are badges, and the punctuation that they leave, for example `ter-icn3: Unity-guided research` becomes `Unity-guided research`, and `Mottle (t7-3e22)` becomes `Mottle`.
 - A badge is a ticket mark: hover, focus and pin work as on a ticket row.
 

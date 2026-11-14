@@ -12,7 +12,7 @@ from agentmap.components.fade.fade import fade
 from agentmap.components.hover.hover import hover
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
 from agentmap.components.tag.tag import tag
-from agentmap.components.view import Forest, age_class, format_age, summary
+from agentmap.components.view import Forest, age_class, element_id, format_age, summary, title_without
 from agentmap.events import Event
 from agentmap.status import Status
 from agentmap.t3 import AgentThread, Touch
@@ -63,8 +63,8 @@ CELLS = [
 ]
 
 
-def render(threads, statuses=None, cells=CELLS, events=()):
-    return app(threads, statuses or {}, cells, list(events), NOW, "demo")
+def render(threads, statuses=None, cells=CELLS, events=(), tickets=frozenset()):
+    return app(threads, statuses or {}, cells, list(events), NOW, "demo", tickets)
 
 
 def row(html, tag):
@@ -227,6 +227,42 @@ class FadeTest(unittest.TestCase):
         self.assertIn("@property --fade { syntax: '<number>'; inherits: true; initial-value: 0; }", CSS)
         # A transition would start every mark at --fade 0 on page load.
         self.assertNotIn("transition: --fade", CSS)
+
+
+class TicketBadgeTest(unittest.TestCase):
+    IDS = frozenset({"ter-icn3", "t7-3e22", "t0-6gej"})
+
+    def test_a_row_shows_a_badge_for_each_ticket_that_its_title_or_status_names(self):
+        html = render([thread("a", title="ter-icn3: Unity research")],
+                      {"a": status("t7-3e22: step two")}, tickets=self.IDS)
+        o = row(html, "A")
+        self.assertRegex(o, r'<span class="tkbs"><button class="tkb" [^>]*>ter-icn3</button>'
+                            r'<button class="tkb" [^>]*>t7-3e22</button></span><span class="state">')
+
+    def test_the_title_drops_the_ids_that_are_badges(self):
+        for title, shown in [("ter-icn3: Unity research", "Unity research"),
+                             ("Mottle and specks (t7-3e22)", "Mottle and specks"),
+                             ("Build t0-6gej area record", "Build area record"),
+                             ("t0-6gej, t7-3e22 - merge both", "merge both"),
+                             ("[ter-icn3] Budget", "Budget"),
+                             ("ter-icn3", "ter-icn3"),
+                             ("Keep ter-zzzz in the title", "Keep ter-zzzz in the title")]:
+            with self.subTest(title=title):
+                self.assertEqual(title_without(title, self.IDS), shown)
+
+    def test_a_badge_is_a_ticket_mark_with_its_own_place(self):
+        dom = element_id("t", "ter-icn3")
+        o = row(render([thread("a", title="ter-icn3: Unity research")], tickets=self.IDS), "A")
+        self.assertIn("$focus = ' A '; $hue = '75.0'; $pin || $peek == '" + dom + "'", o)
+        self.assertIn(f"$pinat = 'b-A-{dom}', @get('/pin/ter-icn3')", o)
+
+    def test_a_row_without_tickets_keeps_an_empty_badge_slot(self):
+        self.assertIn('<span class="tkbs"></span><span class="state">', row(render([thread("a")]), "A"))
+
+    def test_a_badge_lights_and_anchors_like_the_other_ticket_marks(self):
+        self.assertIn(".now-item:hover, .tk-head:hover, .tkb:hover { anchor-name: --peek; }", CSS)
+        self.assertIn(".now-item.pinned, .tk-head.pinned, .tkb.pinned { anchor-name: --pin; }", CSS)
+        self.assertRegex(CSS, r"\.tkb\.hl \{[^}]*var\(--focus-hue\)")
 
 
 class PageTest(unittest.TestCase):

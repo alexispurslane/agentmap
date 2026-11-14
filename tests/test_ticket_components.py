@@ -270,7 +270,7 @@ class PinnedBoxTest(unittest.TestCase):
         rule = re.search(r"\.peek\.pinned \{([^}]*)\}", CSS).group(1)
         for part in ("position-anchor: --pin;", "pointer-events: auto;", "overflow-y: auto;"):
             self.assertIn(part, rule)
-        self.assertIn(".now-item.pinned, .tk-head.pinned { anchor-name: --pin; }", CSS)
+        self.assertIn(".now-item.pinned, .tk-head.pinned, .tkb.pinned { anchor-name: --pin; }", CSS)
 
 
 class TicketPeekTest(unittest.TestCase):
@@ -294,7 +294,7 @@ class TicketPeekTest(unittest.TestCase):
         # The element under the pointer is the anchor. A ticket can show in its
         # epic column and in the open list at once, so a class per ticket would
         # make two anchors.
-        self.assertIn(".now-item:hover, .tk-head:hover { anchor-name: --peek; }", CSS)
+        self.assertIn(".now-item:hover, .tk-head:hover, .tkb:hover { anchor-name: --peek; }", CSS)
         self.assertIn("position-anchor: --peek;", CSS)
         self.assertIn("position-try-fallbacks: flip-block, flip-inline;", CSS)
 

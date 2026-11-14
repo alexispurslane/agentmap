@@ -131,7 +131,7 @@ class Dashboard:
         # The event log merges T3 Code's history with the status log's history.
         events = self.reader.events(now) + self.store.events()
         threads = self.reader.snapshot(now)
-        fragments = {"app": app(threads, statuses, cells, events, now, self.project_name)}
+        fragments = {"app": app(threads, statuses, cells, events, now, self.project_name, tickets.keys())}
         forest = Forest(threads)
         links = ticket_agents(forest, statuses, tickets.keys())
         # The ticket fragments are large, so they render again only when the

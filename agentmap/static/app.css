@@ -118,15 +118,22 @@ body {
 }
 
 .row {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 3px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 10px; row-gap: 3px;
   padding: 8px 10px 9px; border-bottom: 1px solid var(--rule-soft);
 }
+/* Ticket badges sit in a fixed slot between the title and the state. */
+.tkbs { display: flex; gap: 4px; align-self: start; margin-top: 2px; }
+.tkb { all: unset; cursor: pointer; font: 600 12.5px/20px var(--mono); padding: 0 6px; border: 1px solid #c4c4c2; border-radius: 3px; color: #333; background: var(--ground); white-space: nowrap; }
+.tkb:hover { border-color: #777; }
+.tkb.hl { background: oklch(.93 .05 var(--focus-hue)); border-color: oklch(.56 .17 var(--focus-hue)); }
+.tkb.pinned { background: var(--ink); border-color: var(--ink); color: #fff; }
+.tkb:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .row > .tag { align-self: start; margin-top: 2px; background: oklch(calc(.56 + .08 * var(--fade)) calc(.17 - .07 * var(--fade)) var(--hue)); }
 .row .title { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
 .row .state { font-size: 14px; font-weight: 700; color: var(--ok); white-space: nowrap; }
 .row.idle .state { color: #737373; font-weight: 400; }
 .row.failed .state, .row.needs-you .state { color: #fff; background: var(--red); padding: 0 8px; border-radius: 2px; }
-.row .line { grid-column: 2 / 4; display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.row .line { grid-column: 2 / 5; display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .lbl {
   font-size: 11px; font-weight: 700; color: #6b6b6b; text-align: center;
   border: 1px solid #c4c4c2; border-radius: 2px; line-height: 16px; letter-spacing: .02em;
@@ -135,11 +142,11 @@ body {
 .line .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--ink), #949494 calc(var(--fade) * 100%)); }
 .line.tool .text { font: 15px var(--mono); color: var(--ink); }
 .line.thought .text { font-style: italic; }
-.row .meta { grid-column: 2 / 4; font-size: 13px; color: #737373; }
+.row .meta { grid-column: 2 / 5; font-size: 13px; color: #737373; }
 .row.compact { padding-top: 5px; padding-bottom: 5px; }
 .row.compact .title { font-size: 15px; font-weight: 400; }
 .row.hl { background: oklch(.97 .025 var(--hue)); box-shadow: inset 3px 0 0 oklch(.56 .17 var(--hue)); }
-.kids { grid-column: 1 / 4; margin: 6px -10px -9px 22px; border-left: 1px solid var(--rule); }
+.kids { grid-column: 1 / 5; margin: 6px -10px -9px 22px; border-left: 1px solid var(--rule); }
 .kids > .row:last-child { border-bottom: 0; }
 
 /* Event log */
@@ -230,8 +237,8 @@ body {
    pause, moves at once from one ticket to the next, and closes at once, because
    it loses its anchor on mouseleave. Text past the box's height fades out in
    its bottom padding. */
-.now-item:hover, .tk-head:hover { anchor-name: --peek; }
-.now-item.pinned, .tk-head.pinned { anchor-name: --pin; }
+.now-item:hover, .tk-head:hover, .tkb:hover { anchor-name: --peek; }
+.now-item.pinned, .tk-head.pinned, .tkb.pinned { anchor-name: --pin; }
 .peek {
   position: fixed; position-anchor: --peek; top: anchor(bottom); left: anchor(left);
   position-try-fallbacks: flip-block, flip-inline;

@@ -406,6 +406,11 @@ class TicketFragmentTest(unittest.TestCase):
         self.assertIn("Title of ep", self.dash.hub.fragments["epics"])
         self.assertIn("Title of ep-1", self.dash.hub.fragments["tickets"])
 
+    def test_the_agent_rows_get_badges_for_the_known_tickets(self):
+        self.dash.tick()
+        self.assertIn(">ep-1</button>", self.dash.hub.fragments["app"])
+        self.assertIn('<h3 class="title">build</h3>', self.dash.hub.fragments["app"])
+
     def test_a_ticket_change_publishes_new_ticket_fragments(self):
         self.dash.tick()
         self.tickets.by_id["ep-1"] = ticket("ep-1", parent="ep", title="Renamed")

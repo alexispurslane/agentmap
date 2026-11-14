@@ -185,10 +185,8 @@ def ticket_agents(forest: Forest, statuses: Mapping[str, Status],
     """
     links: dict[str, list[str]] = {}
     for t in forest.walk():
-        text = t.title + " " + (statuses[t.id].text if t.id in statuses else "")
-        for word in dict.fromkeys(w.rstrip("-_") for w in _WORD.findall(text)):
-            if word in ids:
-                links.setdefault(word, []).append(t.id)
+        for word in named_ids(t.title + " " + (statuses[t.id].text if t.id in statuses else ""), ids):
+            links.setdefault(word, []).append(t.id)
     return links
 
 
@@ -209,3 +207,26 @@ def ticket_state(ticket: Ticket, tickets: Mapping[str, Ticket]) -> str:
     if ticket.status == "in_progress":
         return "in_progress"
     return "blocked" if blocked_by(ticket, tickets) else "ready"
+
+
+def named_ids(text: str, ids: Collection[str]) -> list[str]:
+    """The ids in `ids` that the text names as whole words, in order of first mention."""
+    return [w for w in dict.fromkeys(w.rstrip("-_") for w in _WORD.findall(text)) if w in ids]
+
+
+# Punctuation that a removed id leaves at the start or the end of a title.
+_TITLE_EDGES = re.compile(r"^[\s:;,.\-–—]+|[\s:;,\-–—]+$")
+
+
+def title_without(title: str, ids: Collection[str]) -> str:
+    """The title without the ticket ids that it names, and without the punctuation they leave.
+
+    For example "ter-icn3: Unity research" becomes "Unity research", and
+    "Mottle (t7-3e22)" becomes "Mottle". A title that is only ids stays as it is.
+    """
+    text = title
+    for found in named_ids(title, ids):
+        text = re.sub(rf"(?<![A-Za-z0-9_-]){re.escape(found)}(?![A-Za-z0-9_])", "", text)
+    text = re.sub(r"\(\s*\)|\[\s*\]", "", text)
+    text = _TITLE_EDGES.sub("", re.sub(r"\s{2,}", " ", text))
+    return text or title

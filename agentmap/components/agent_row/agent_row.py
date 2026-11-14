@@ -11,12 +11,15 @@ COMPACT_AFTER = timedelta(minutes=10)
 
 
 def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
-              kids_html: str, is_root: bool, now: datetime) -> str:
+              kids_html: str, is_root: bool, now: datetime, *, badges: list[str] = (),
+              title: str | None = None) -> str:
     """One thread's row in the agent tree, with its children's rows inside it.
 
     A full row shows the current tool call (while the thread works) and one
     summary line: the newest of the agent's posted status, its last message
     and its newest thought. An idle child quiet for over 10 minutes is one line.
+    `badges` are the HTML of its ticket badges, which sit in a fixed slot before
+    the state. `title` replaces the thread's title, for example without its ids.
     """
     age = format_age(now - thread.updated_at)
     line = summary(thread, status)
@@ -26,7 +29,8 @@ def agent_row(thread: AgentThread, tag: str, hue: float, status: Status | None,
         "tag": tag,
         "hue": hue,
         "enter": "mouseover__stop",
-        "title": thread.title,
+        "title": thread.title if title is None else title,
+        "badges": list(badges),
         "state": STATE_CLASS[thread.state],
         "state_label": {"working": "working", "needs_you": "needs you",
                         "idle": f"idle {age}", "failed": f"failed {age}"}[thread.state],
