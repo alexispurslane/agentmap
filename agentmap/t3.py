@@ -165,6 +165,8 @@ class T3Reader:
         self._data_version: int | None = None
         self._cache: dict[str, tuple[tuple, _Details]] = {}
         self._logs: dict[str, _Log] = {}
+        # The roots of other checkouts that touched paths came from; see checkouts().
+        self._checkouts: set[str] = set()
 
     def close(self) -> None:
         self._conn.close()
@@ -191,6 +193,17 @@ class T3Reader:
             if row is None:
                 return None
             return row[0] in self._project_ids()
+
+    def checkouts(self) -> list[str]:
+        """The roots of the other checkouts of the project that threads touched, sorted.
+
+        Another checkout is a copy of the project outside the known roots, such as
+        a scratch clone. Its root is the part of a touched path before the path's
+        first anchor. Only roots that still exist on disk count.
+        """
+        with self._lock:
+            found = list(self._checkouts)
+        return sorted(r for r in found if os.path.isdir(r))
 
     def worktrees(self) -> list[str]:
         """The worktree folders of the project's threads that exist on disk, sorted.
@@ -409,6 +422,9 @@ class T3Reader:
         for ordinal, path, started in rows:
             newest = max(newest, ordinal)
             rel = _relative(path, places)
+            checkout = _checkout(path, places)
+            if checkout is not None:
+                self._checkouts.add(checkout)
             if rel is not None and rel not in seen:
                 seen.add(rel)
                 touched.append(Touch(rel, _parse(started)))
@@ -541,17 +557,29 @@ def _relative(path: str, places: _Places) -> str | None:
     scratch clone or another worktree: it starts at its first pair of parts,
     from the left, that is an anchor.
     """
+    split = _split(path, places)
+    return split[1] if split else None
+
+
+def _checkout(path: str, places: _Places) -> str | None:
+    """The root of the other checkout that holds the path, or None for a path under a root."""
+    split = _split(path, places)
+    return split[0] if split else None
+
+
+def _split(path: str, places: _Places) -> tuple[str | None, str] | None:
+    """(the root of another checkout or None, the path in the project), or None."""
     if not path.startswith("/"):
         return None
     path = posixpath.normpath(path)
     for root in places.roots:
         root = posixpath.normpath(root)
         if path.startswith(root + "/"):
-            return _CLAUDE_WORKTREE.sub("", path[len(root) + 1:])
+            return None, _CLAUDE_WORKTREE.sub("", path[len(root) + 1:])
     parts = path.split("/")[1:]
     for i in range(len(parts) - 1):
         if f"{parts[i]}/{parts[i + 1]}" in places.anchors:
-            return "/".join(parts[i:])
+            return ("/" + "/".join(parts[:i]) if i else None), "/".join(parts[i:])
     return None
 
 

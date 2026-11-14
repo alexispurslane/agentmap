@@ -744,6 +744,42 @@ class OtherCheckouts(unittest.TestCase):
         self.f.item("t", "file_change", fileName="/tmp/copy/src/render/x.rs")
         self.assertEqual(paths(self.snapshot(anchors=frozenset()).touched), ())
 
+    def checkouts_after(self, *names):
+        """The reader's other checkouts after the thread touched these paths under a temp folder."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        base = pathlib.Path(tmp.name).resolve()
+        for name in names:
+            path = base / name
+            if not name.startswith("gone/"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            self.f.item("t", "file_change", fileName=str(path))
+        reader = self.f.reader(self, anchors=lambda: self.ANCHORS)
+        reader.snapshot(NOW)
+        return base, reader.checkouts()
+
+    def test_the_reader_lists_the_root_of_each_other_checkout_that_it_saw(self):
+        base, found = self.checkouts_after("copy/src/render/a.comp", "deep/x/src/core/b.rs",
+                                           "copy/docs/plan.md")
+        self.assertEqual(found, [f"{base}/copy", f"{base}/deep/x"])
+
+    def test_a_checkout_that_is_gone_from_the_disk_is_not_listed(self):
+        _, found = self.checkouts_after("gone/src/render/a.comp")
+        self.assertEqual(found, [])
+
+    def test_the_roots_are_not_other_checkouts(self):
+        self.f.item("t", "file_change", fileName="/wt/t1/src/render/a.comp")
+        self.f.item("t", "file_change", fileName=ROOT + "/src/core/b.rs")
+        reader = self.f.reader(self, anchors=lambda: self.ANCHORS)
+        reader.snapshot(NOW)
+        self.assertEqual(reader.checkouts(), [])
+
+    def test_an_anchor_at_the_top_of_the_disk_gives_no_checkout(self):
+        self.f.item("t", "file_change", fileName="/src/render/x.rs")
+        reader = self.f.reader(self, anchors=lambda: self.ANCHORS)
+        reader.snapshot(NOW)
+        self.assertEqual(reader.checkouts(), [])
+
     def test_the_tool_line_names_the_mapped_path(self):
         run = self.f.run("t", 1, "running")
         self.f.item("t", "file_change", "running", run, fileName="/tmp/copy/src/core/z.rs")

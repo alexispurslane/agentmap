@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     # The project root comes first: the ticket store reads it on every poll.
     tickets = TicketStore(lambda: [root / ".tickets",
                                    *(Path(w) / ".tickets" for w in reader.worktrees()),
+                                   *(Path(c) / ".tickets" for c in reader.checkouts()),
                                    *sorted(root.glob(".claude/worktrees/*/.tickets"))])
     tickets.poll()
     # Codex threads share one process and send no thread header. The finder
