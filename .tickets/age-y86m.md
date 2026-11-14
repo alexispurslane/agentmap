@@ -1,6 +1,6 @@
 ---
 id: age-y86m
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-14T14:48:16Z
