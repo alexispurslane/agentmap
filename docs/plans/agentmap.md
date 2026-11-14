@@ -185,10 +185,19 @@ Facts about the database (schema of T3 Code on 2026-11-14):
 - `orchestration_v2_projection_runs` has the runs of a thread, with `ordinal` and `status`. The newest run's status gives the state: `queued`, `preparing`, `starting`, `running` and `waiting` mean working. `failed` means failed. Other values mean idle.
 - `orchestration_v2_projection_turn_items` has each step of a run. The `type` column and `payload_json` hold the content. A waiting `user_input_request`, `approval_request` or `secret_request` item means `needs_you`.
 - A run row has `completed_at` once the run ends.
+- The thread payload has `settledAt` and `settledOverride`. T3 Code sets `settledAt` and the override `settled` when the user settles a thread. It does the same for a subagent within a second of the end of its task, also when the task fails.
 - Every turn item's payload has `startedAt`. An ended item also has `completedAt`.
 - The database is in WAL mode. Open it with `file:...?mode=ro` and `uri=True`.
 
 Which threads a snapshot holds: threads of the project with `updated_at` inside the window, plus all ancestors of those threads, so that every tree is whole.
+
+Which threads the board shows: every thread of the snapshot that is not settled, and every settled thread with a shown descendant. A thread is settled when three facts are true:
+
+1. Its work ended: the newest task from its parent is `completed`, `cancelled` or `interrupted`, or T3 Code marked it settled.
+2. It did not fail: its task is not `failed` and its state is not failed. T3 Code marks a failed subagent settled, but the board keeps failures in view.
+3. It does nothing now: its state is not working and not `needs_you`.
+
+A root has no task, so only the mark of T3 Code settles it. A settled thread leaves the map and the tree, but its events stay in the log.
 
 Now line rules, from the newest turn item that is `pending`, `running` or `waiting`. If no item is active, the now line is `None`.
 
@@ -263,7 +272,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 
 - Each folder `agentmap/components/<name>/` holds `<name>.py`, with one pure function that takes typed arguments and returns HTML, and `<name>.html`, its Mustache template. A template can include another component's template as a partial, for example `{{> hover}}`.
 - `components/_template.py` renders a template with chevron. Chevron escapes `{{value}}`. Attributes in templates use double quotes, because chevron does not escape `'`.
-- `components/view.py` holds the facts that several components share: the ownership tree (`Forest`), tags, hues, the ink ramp of ages (`a0` to `a4`), the summary line, and the rule that hides settled subagents.
+- `components/view.py` holds the facts that several components share: the ownership tree (`Forest`), tags, hues, the ink ramp of ages (`a0` to `a4`), the summary line, and the rule that hides settled threads.
 - `page` returns the whole document. `app` returns `<main id="app">` with the rail, the map, the agent tree and the event log.
 - Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°).
 - Every mark is linked through the focus: the signals `$focus` (a set of thread tags) and `$hue`. A thread mark (dot, route, row, event, chip) uses `{{> hover}}`. A ticket mark (epic column, ticket, ticket row) uses `{{> link}}`. See `docs/plans/live-tickets.md`.

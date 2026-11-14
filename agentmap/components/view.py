@@ -69,12 +69,18 @@ def element_id(prefix: str, key: str) -> str:
 
 
 def settled(t: AgentThread) -> bool:
-    """True if the thread is a subagent whose task ended and that does nothing now.
+    """True if the thread's work ended without a failure and the thread does nothing now.
 
-    A root thread has no delegation, so it never settles. A settled thread that
-    gets a new task, or a new message, is live again.
+    The work ended in one of two ways: the parent's task for the thread ended
+    (`delegation`), or T3 Code marked the thread settled (`settled_at`). A root
+    has no task, so only the mark settles it. A failure never settles: T3 Code
+    marks a subagent settled the moment it fails, and the board keeps failures
+    in view. A settled thread that gets a new task, or that works or needs the
+    user again, is live again.
     """
-    return t.delegation in SETTLED_DELEGATIONS and t.state not in ("working", "needs_you")
+    ended = t.delegation in SETTLED_DELEGATIONS or t.settled_at is not None
+    failed = t.delegation == "failed" or t.state == "failed"
+    return ended and not failed and t.state not in ("working", "needs_you")
 
 
 class Forest:

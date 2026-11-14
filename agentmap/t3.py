@@ -83,7 +83,9 @@ class AgentThread:
     every `parent_id` names a thread of the same snapshot, or is None.
     `delegation` is the status of the newest task that a parent gave to the
     thread (running, completed, failed, cancelled, interrupted), or None for a
-    thread that got no task.
+    thread that got no task. `settled_at` is when T3 Code marked the thread
+    settled (the user did it, or T3 did it for an ended subagent), or None
+    for a thread without the mark or one that the user unsettled.
     """
 
     id: str
@@ -101,6 +103,7 @@ class AgentThread:
     said_at: datetime | None
     touched: tuple[Touch, ...]
     delegation: str | None = None
+    settled_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -330,7 +333,7 @@ class T3Reader:
             now=details.now, thought=_text_of(details.thought),
             last_said=_text_of(details.said), thought_at=_time_of(details.thought),
             said_at=_time_of(details.said), touched=details.touched,
-            delegation=self._delegation(thread_id))
+            delegation=self._delegation(thread_id), settled_at=_settled_at(payload))
 
     def _delegation(self, thread_id: str) -> str | None:
         """The status of the newest delegation record whose child is this thread.
@@ -523,6 +526,14 @@ def _ask(type_: str, item: dict) -> str:
     else:
         text = item.get("label")
     return (_first_sentence(text) if isinstance(text, str) else None) or ""
+
+
+def _settled_at(payload: dict) -> datetime | None:
+    """When T3 Code marked the thread settled, or None if it has no mark or the user unsettled it."""
+    at = payload.get("settledAt")
+    if not at or payload.get("settledOverride") == "unsettled":
+        return None
+    return _parse(at)
 
 
 def _parent_of(row: tuple) -> str | None:

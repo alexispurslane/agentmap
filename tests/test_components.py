@@ -32,7 +32,8 @@ def fades(minutes):
 
 def thread(id, parent=None, *, title=None, created=60, updated=0, state="working",
            now=None, thought=None, thought_at=None, last_said=None, said_at=None,
-           touched=(), provider="claude", model="claude-opus-5-5", delegation=None):
+           touched=(), provider="claude", model="claude-opus-5-5", delegation=None,
+           settled_at=None):
     """A thread created `created` and updated `updated` minutes before NOW.
 
     `touched` holds paths (touched 1 minute apart, newest first) or (path, minutes) pairs.
@@ -44,7 +45,7 @@ def thread(id, parent=None, *, title=None, created=60, updated=0, state="working
         model=model, state=state, created_at=ago(created), updated_at=ago(updated),
         now=now, thought=thought, thought_at=None if thought_at is None else ago(thought_at),
         last_said=last_said, said_at=None if said_at is None else ago(said_at), touched=touches,
-        delegation=delegation)
+        delegation=delegation, settled_at=None if settled_at is None else ago(settled_at))
 
 
 def status(text, minutes=0):
@@ -636,8 +637,34 @@ class SettledTest(unittest.TestCase):
         self.assertIn("Thread k", row(html, "A1"))
         self.assertIn("Thread g", row(html, "A1.1"))
 
-    def test_a_root_never_settles(self):
+    def test_a_root_without_a_settle_mark_stays(self):
         self.assertIn("Thread r", row(render([thread("r", state="idle", updated=50)]), "A"))
+
+    def test_a_root_that_t3_settled_leaves_the_map_and_the_tree(self):
+        html = render([thread("r", state="idle", settled_at=1, touched=["src/b/x"]),
+                       thread("s", created=30, touched=["docs/a"])])
+        self.assertNotIn('data-tag="A"', section(html, "tree"))
+        self.assertNotIn("A", [t for t, *_ in dots(html)])
+        self.assertIn("Thread s", row(html, "B"))
+
+    def test_a_failure_stays_although_t3_marks_it_settled(self):
+        # T3 Code marks a subagent settled the moment it fails, so the mark alone hides failures.
+        failed_task = render([thread("r", created=90),
+                              thread("k", "r", created=50, state="idle", delegation="failed",
+                                     settled_at=1)])
+        self.assertIn("Thread k", row(failed_task, "A1"))
+        failed_root = render([thread("r", state="failed", settled_at=1)])
+        self.assertIn("Thread r", row(failed_root, "A"))
+
+    def test_a_thread_that_t3_settled_comes_back_while_it_works_or_needs_you(self):
+        for state in ("working", "needs_you"):
+            html = render([thread("r", state=state, settled_at=1)])
+            self.assertIn("Thread r", row(html, "A"), state)
+
+    def test_a_root_that_t3_settled_stays_while_a_descendant_works(self):
+        html = render([thread("r", state="idle", settled_at=1),
+                       thread("k", "r", created=30, delegation="running")])
+        self.assertIn("Thread r", row(html, "A"))
 
     def test_the_tree_counts_only_the_threads_it_shows(self):
         self.assertIn("<small>2 threads</small>", section(self.scene(), "tree"))

@@ -50,13 +50,16 @@ class Fixture:
     def thread(self, thread_id, *, project_id=PROJECT, title=None, parent=None,
                provider="claudeAgent", model="claude-opus-5-5", created=60.0,
                updated=1.0, worktree=None, forked_from=None, archived_at=None,
-               deleted_at=None):
+               deleted_at=None, settled=None, override=None):
+        """A thread; `settled` is how many minutes before NOW T3 Code marked it settled."""
         payload = {
             "id": thread_id,
             "providerInstanceId": provider,
             "modelSelection": {"instanceId": provider, "model": model} if model else None,
             "worktreePath": worktree,
             "lineage": {"parentThreadId": parent} if parent else None,
+            "settledAt": stamp(settled) if settled is not None else None,
+            "settledOverride": override,
         }
         if forked_from:
             payload["forkedFrom"] = {"type": "node", "nodeId": forked_from}
@@ -334,6 +337,25 @@ class Delegation(unittest.TestCase):
         self.assertEqual(by_id(reader.snapshot(NOW))["t"].delegation, "completed")
         self.f.delegation("t", "running", started=1)
         self.assertEqual(by_id(reader.snapshot(NOW))["t"].delegation, "running")
+
+
+class SettleMark(unittest.TestCase):
+    """`settled_at` is when T3 Code marked the thread settled, or None."""
+
+    def settled_at(self, **marks):
+        f = Fixture(self)
+        f.thread("t", updated=1, **marks)
+        return by_id(f.reader(self).snapshot(NOW))["t"].settled_at
+
+    def test_a_thread_without_a_mark_is_not_settled(self):
+        self.assertIsNone(self.settled_at())
+
+    def test_a_thread_that_t3_settled_has_the_time_of_the_mark(self):
+        self.assertEqual(self.settled_at(settled=5, override="settled"),
+                         NOW - timedelta(minutes=5))
+
+    def test_a_thread_that_the_user_unsettled_is_not_settled(self):
+        self.assertIsNone(self.settled_at(settled=5, override="unsettled"))
 
 
 class NativeSubagentState(unittest.TestCase):
