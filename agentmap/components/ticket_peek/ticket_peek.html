@@ -1,1 +1,1 @@
-<div data-show="$peek == '{{dom}}'"><h3 class="peek-title">{{title}}</h3><div class="md">{{#text}}{{{.}}}{{/text}}{{^text}}<p class="empty">No description.</p>{{/text}}</div></div>
+<div data-show="($pin || $peek) == '{{dom}}'">{{#pinned}}<button class="close unpin" data-on:click="$pin = ''; $pinat = ''" aria-label="Unpin">✕</button>{{/pinned}}<h3 class="peek-title">{{title}}</h3><div class="md">{{#text}}{{{.}}}{{/text}}{{^text}}<p class="empty">No description.</p>{{/text}}{{#notes}}<section class="note"><time>{{at}}</time>{{{text}}}</section>{{/notes}}</div></div>

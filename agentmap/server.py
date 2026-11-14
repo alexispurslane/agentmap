@@ -22,9 +22,9 @@ from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from agentmap import mcp
-from agentmap.components import app, epic_strip, page, ticket_body, ticket_lists, ticket_peek
+from agentmap.components import app, epic_strip, page, ticket_lists, ticket_peek
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
-from agentmap.components.view import Forest, element_id, ticket_agents
+from agentmap.components.view import Forest, ticket_agents
 from agentmap.t3 import anchors
 from agentmap.tickets import groups
 from agentmap.treemap import Cell, build_cells, code_weights
@@ -203,10 +203,10 @@ class _Handler(BaseHTTPRequestHandler):
             f = {**EMPTY, **self.dashboard.hub.fragments}
             self._send(200, page(f["app"], f["epics"], f["tickets"]).encode(),
                        {"Content-Type": "text/html; charset=utf-8"})
-        elif path.startswith("/ticket/"):
-            self._ticket(unquote(path[len("/ticket/"):]))
         elif path.startswith("/peek/"):
-            self._peek(unquote(path[len("/peek/"):]))
+            self._box(unquote(path[len("/peek/"):]), pinned=False)
+        elif path.startswith("/pin/"):
+            self._box(unquote(path[len("/pin/"):]), pinned=True)
         elif path == "/stream":
             self._stream()
         elif path.startswith("/static/") and path[len("/static/"):] in STATIC:
@@ -259,21 +259,14 @@ class _Handler(BaseHTTPRequestHandler):
     def _error(self, status: int, text: str, extra: dict[str, str] | None = None) -> None:
         self._send(status, f"{text}\n".encode(), {"Content-Type": "text/plain", **(extra or {})})
 
-    def _ticket(self, ticket_id: str) -> None:
-        """The rendered text of one ticket, as an inner patch of its row's text box."""
-        self._patch_ticket(ticket_id, ticket_body, "#tb-" + element_id("t", ticket_id))
-
-    def _peek(self, ticket_id: str) -> None:
-        """The title and description of one ticket, as an inner patch of the hover box."""
-        self._patch_ticket(ticket_id, ticket_peek, "#peek")
-
-    def _patch_ticket(self, ticket_id: str, component, box: str) -> None:
+    def _box(self, ticket_id: str, pinned: bool) -> None:
+        """One ticket's hover box, or its pinned box with the notes, as an inner patch of #peek."""
         source = self.dashboard.tickets
         found = source.tickets().get(ticket_id) if source is not None else None
         if found is None:
             self._error(404, "no such ticket")
             return
-        self._send(200, sse_patch(component(found), selector=box, mode="inner"),
+        self._send(200, sse_patch(ticket_peek(found, pinned), selector="#peek", mode="inner"),
                    {"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
 
     def _stream(self) -> None:

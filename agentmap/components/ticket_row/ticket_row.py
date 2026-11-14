@@ -10,18 +10,16 @@ from agentmap.tickets import Ticket, blocked_by
 
 def ticket_row(ticket: Ticket, tickets: Mapping[str, Ticket], links: Mapping[str, list[str]],
                forest: Forest, now: datetime) -> str:
-    """One ticket in a ticket list: a line of metadata, the title, and an empty text box.
+    """One ticket in a ticket list: a line of metadata, then the title.
 
-    A click on the row toggles `$ticket` and loads the rendered text into the
-    box. The box has `data-ignore-morph`, so a later patch of the list keeps it.
     The row's head is a ticket mark: a hover focuses the ticket's threads and
-    opens its hover box.
+    opens its hover box, and a click pins the box.
     """
     workers = links.get(ticket.id, [])
     newest_note = ticket.notes[-1].at if ticket.notes else None
     n = len(ticket.notes)
     return render("ticket_row", {
-        **link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ticket.id),
+        **link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ticket.id, "r"),
         "dom": element_id("t", ticket.id),
         "state": ticket_state(ticket, tickets), "age": age_class(now, ticket.changed_at),
         "id": ticket.id, "priority": ticket.priority, "type": ticket.type, "title": ticket.title,

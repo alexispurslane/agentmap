@@ -439,15 +439,20 @@ class TicketFragmentTest(unittest.TestCase):
         for marker in (b'<main id="app">', b'<div id="tickets">', b'<section id="epics"'):
             self.assertIn(marker, data)
 
-    def test_the_ticket_route_patches_the_rendered_text_into_the_rows_box(self):
-        resp, data = self.get(self.serve(), "/ticket/ep-1")
+    def test_the_pin_route_patches_the_whole_ticket_into_the_box(self):
+        resp, data = self.get(self.serve(), "/pin/ep-1")
         self.assertEqual(resp.status, 200)
         self.assertEqual(resp.getheader("Content-Type"), "text/event-stream")
-        self.assertIn(f"data: selector #tb-{element_id('t', 'ep-1')}\ndata: mode inner\n".encode(), data)
+        self.assertIn(b"data: selector #peek\ndata: mode inner\n", data)
         self.assertIn(b"Hello <strong>there</strong>.", data)
+        self.assertIn(b'class="close unpin"', data)
 
-    def test_an_unknown_ticket_gets_404(self):
-        resp, _ = self.get(self.serve(), "/ticket/nothing")
+    def test_an_unknown_ticket_cannot_be_pinned(self):
+        resp, _ = self.get(self.serve(), "/pin/nothing")
+        self.assertEqual(resp.status, 404)
+
+    def test_the_old_ticket_text_route_is_gone(self):
+        resp, _ = self.get(self.serve(), "/ticket/ep-1")
         self.assertEqual(resp.status, 404)
 
     def test_the_peek_route_patches_the_title_and_description_into_the_peek_box(self):

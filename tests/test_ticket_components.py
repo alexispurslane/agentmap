@@ -4,7 +4,7 @@ import re
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from agentmap.components import epic_strip, page, ticket_body, ticket_lists, ticket_peek
+from agentmap.components import epic_strip, page, ticket_lists, ticket_peek
 from agentmap.components.close.close import close
 from agentmap.components.link.link import link
 from agentmap.components.view import Forest, element_id, ticket_agents
@@ -58,10 +58,14 @@ EPIC = [
 
 
 # The attributes of a ticket mark that the thread A (hue 75.0) works on: a hover
-# focuses A and peeks at the ticket.
+# focuses A and peeks at the ticket unless a box is pinned. A click pins the box
+# to this mark, or unpins it. `{mark}` is the mark's id, unique on the page.
 PEEK = ('data-on:mouseover__stop="$focus = \' A \'; $hue = \'75.0\'; '
-        '$peek == \'{dom}\' || ($peek = \'{dom}\', @get(\'/peek/{url}\'))" '
+        '$pin || $peek == \'{dom}\' || ($peek = \'{dom}\', @get(\'/peek/{url}\'))" '
         'data-on:mouseleave="$focus = \'\'; $peek = \'\'" '
+        'data-on:click__stop="$pinat == \'{mark}\' ? ($pin = \'\', $pinat = \'\') : '
+        '($pin = \'{dom}\', $pinat = \'{mark}\', @get(\'/pin/{url}\'))" '
+        'data-class:pinned="$pinat == \'{mark}\'" '
         'data-class:hl="$focus.includes(\' A \')"')
 WORKER = [thread("t1", "ter-69s8: build the cap")]
 
@@ -115,7 +119,7 @@ class EpicStripTest(unittest.TestCase):
     def test_hovering_a_ticket_in_progress_peeks_at_it(self):
         col = column(board(EPIC, WORKER)[0], "ter-89xq")
         dom = element_id("t", "ter-69s8")
-        self.assertIn(f'<span class="now-item" {PEEK.format(dom=dom, url="ter-69s8")}>', col)
+        self.assertIn(f'<span class="now-item" {PEEK.format(dom=dom, url="ter-69s8", mark="c-" + dom)}>', col)
 
     def test_the_bar_shows_the_closed_and_in_progress_shares(self):
         col = column(board(EPIC)[0], "ter-89xq")
@@ -130,10 +134,10 @@ class EpicStripTest(unittest.TestCase):
         strip, _ = board([ticket("a", status="in_progress", changed=0)])
         self.assertIn('<span class="changed">changed now</span>', strip)
 
-    def test_a_click_on_a_column_opens_its_list_and_closes_any_open_ticket(self):
+    def test_a_click_on_a_column_opens_or_closes_its_list(self):
         key = element_id("g", "ter-89xq")
         col = column(board(EPIC)[0], "ter-89xq")
-        self.assertIn(f"data-on:click=\"$epic = $epic == '{key}' ? '' : '{key}'; $ticket = ''\"", col)
+        self.assertIn(f"data-on:click=\"$epic = $epic == '{key}' ? '' : '{key}'\"", col)
         self.assertIn(f"data-class:sel=\"$epic == '{key}'\"", col)
 
     def test_tickets_without_parent_or_children_form_the_no_epic_column(self):
@@ -209,7 +213,7 @@ class TicketListTest(unittest.TestCase):
 
     def test_hovering_a_row_peeks_at_its_ticket(self):
         dom = element_id("t", "ter-69s8")
-        self.assertIn(PEEK.format(dom=dom, url="ter-69s8"), row(board(EPIC, WORKER)[1], "ter-69s8"))
+        self.assertIn(PEEK.format(dom=dom, url="ter-69s8", mark="r-" + dom), row(board(EPIC, WORKER)[1], "ter-69s8"))
 
     def test_a_row_shows_its_note_count_and_newest_note_age(self):
         self.assertIn('<span class="notes a2">2 notes · 5m ago</span>', row(board(EPIC)[1], "ter-aaaa"))
@@ -220,43 +224,53 @@ class TicketListTest(unittest.TestCase):
         self.assertNotIn("excerpt", r)
         self.assertNotIn("keeps", r)
 
-    def test_a_click_on_a_row_toggles_it_and_loads_its_text(self):
-        dom = element_id("t", "ter-69s8")
+    def test_a_row_has_no_text_of_its_own_a_click_pins_the_hover_box_instead(self):
         r = row(board(EPIC)[1], "ter-69s8")
-        self.assertIn(f"data-on:click=\"$ticket = $ticket == '{dom}' ? '' : '{dom}'; "
-                      f"$ticket == '{dom}' &amp;&amp; @get('/ticket/ter-69s8')\"", r)
-        self.assertIn(f'<div class="tk-body" id="tb-{dom}" data-ignore-morph '
-                      f'data-show="$ticket == \'{dom}\'" style="display:none"></div>', r)
+        self.assertNotIn("tk-body", r)
+        self.assertNotIn("$ticket", r)
+        self.assertIn("@get('/pin/ter-69s8')", r)
 
     def test_an_id_with_unsafe_characters_is_quoted_in_the_url(self):
         r = row(board([ticket("odd'id", status="in_progress")])[1], "odd'id")
-        self.assertIn("@get('/ticket/odd%27id')", r)
+        self.assertIn("@get('/pin/odd%27id')", r)
 
     def test_a_list_has_a_close_button_and_a_note_for_a_group_that_is_gone(self):
         _, lists = board(EPIC)
-        self.assertIn('<button class="close" data-on:click="$epic = \'\'; $ticket = \'\'" '
-                      'aria-label="Close">✕</button>', lists)
+        self.assertIn('<button class="close" data-on:click="$epic = \'\'" aria-label="Close">✕</button>', lists)
         key = element_id("g", "ter-89xq")
         self.assertIn(f"data-show=\"$epic != '' &amp;&amp; !['{key}'].includes($epic)\"", lists)
 
-    def test_the_close_button_clears_the_open_epic_and_ticket(self):
-        self.assertEqual(close(), '<button class="close" data-on:click="$epic = \'\'; $ticket = \'\'" '
-                                  'aria-label="Close">✕</button>')
+    def test_the_close_button_clears_the_open_epic(self):
+        self.assertEqual(close(), '<button class="close" data-on:click="$epic = \'\'" aria-label="Close">✕</button>')
 
     def test_the_event_log_hides_while_an_epic_is_open(self):
         page_html = page('<main id="app"><section id="log" class="mod" data-show="$epic == \'\'"></section></main>', "", "")
         self.assertIn("data-show=\"$epic == ''\"", page_html)
 
 
-class TicketBodyTest(unittest.TestCase):
-    def test_the_text_is_rendered_markdown_then_the_notes_newest_first(self):
-        html = ticket_body(ticket("x", body="Some **bold**.", notes=[(30, "First."), (5, "Second.")]))
+class PinnedBoxTest(unittest.TestCase):
+    def test_a_pinned_box_adds_the_notes_newest_first(self):
+        html = ticket_peek(ticket("x", body="Some **bold**.", notes=[(30, "First."), (5, "Second.")]), pinned=True)
         self.assertIn("<p>Some <strong>bold</strong>.</p>", html)
+        self.assertLess(html.index("Some"), html.index("Second."))
         self.assertLess(html.index("Second."), html.index("First."))
         self.assertIn(f"<time>{ago(5).astimezone().strftime('%Y-%m-%d %H:%M')}</time>", html)
 
-    def test_a_ticket_without_text_says_so(self):
-        self.assertIn('<p class="empty">No text.</p>', ticket_body(ticket("x")))
+    def test_a_pinned_box_has_a_button_that_unpins_it(self):
+        html = ticket_peek(ticket("x"), pinned=True)
+        self.assertIn('<button class="close unpin" data-on:click="$pin = \'\'; $pinat = \'\'" '
+                      'aria-label="Unpin">✕</button>', html)
+        self.assertNotIn("unpin", ticket_peek(ticket("x")))
+
+    def test_the_box_shows_the_pinned_ticket_before_the_hovered_one(self):
+        dom = element_id("t", "x")
+        self.assertTrue(ticket_peek(ticket("x"), pinned=True).startswith(f'<div data-show="($pin || $peek) == \'{dom}\'">'))
+
+    def test_a_pinned_box_takes_the_pointer_scrolls_and_stays_at_its_mark(self):
+        rule = re.search(r"\.peek\.pinned \{([^}]*)\}", CSS).group(1)
+        for part in ("position-anchor: --pin;", "pointer-events: auto;", "overflow-y: auto;"):
+            self.assertIn(part, rule)
+        self.assertIn(".now-item.pinned, .tk-head.pinned { anchor-name: --pin; }", CSS)
 
 
 class TicketPeekTest(unittest.TestCase):
@@ -267,13 +281,14 @@ class TicketPeekTest(unittest.TestCase):
 
     def test_the_peek_shows_only_while_its_ticket_is_hovered(self):
         dom = element_id("t", "x")
-        self.assertTrue(ticket_peek(ticket("x")).startswith(f'<div data-show="$peek == \'{dom}\'">'))
+        self.assertTrue(ticket_peek(ticket("x")).startswith(f'<div data-show="($pin || $peek) == \'{dom}\'">'))
 
     def test_a_ticket_without_a_description_peeks_with_its_title_and_says_so(self):
         self.assertIn('<p class="empty">No description.</p>', ticket_peek(ticket("x")))
 
     def test_the_link_attributes_quote_the_id_in_the_url(self):
-        self.assertEqual(link(["A"], 75.0, "odd'id"), PEEK.format(dom=element_id("t", "odd'id"), url="odd%27id"))
+        dom = element_id("t", "odd'id")
+        self.assertEqual(link(["A"], 75.0, "odd'id", "b"), PEEK.format(dom=dom, url="odd%27id", mark="b-" + dom))
 
     def test_the_peek_box_is_placed_next_to_the_hovered_ticket_by_css_anchors(self):
         # The element under the pointer is the anchor. A ticket can show in its
@@ -287,14 +302,15 @@ class TicketPeekTest(unittest.TestCase):
 class PageTest(unittest.TestCase):
     def test_the_page_has_one_peek_box_outside_the_fragments(self):
         html = page('<main id="app"></main>', '<section id="epics"></section>', '<div id="tickets"></div>')
-        self.assertIn('<aside id="peek" class="peek" '
-                      'data-class:open="$peek != \'\' &amp;&amp; $peek != $ticket" aria-hidden="true"></aside>', html)
+        self.assertIn('<aside id="peek" class="peek" data-class:open="$pin != \'\' || $peek != \'\'" '
+                      'data-class:pinned="$pin != \'\'" '
+                      'data-on:keydown__window="evt.key == \'Escape\' &amp;&amp; ($pin = \'\', $pinat = \'\')"></aside>', html)
         self.assertLess(html.index('id="epics"'), html.index('id="peek"'))
 
     def test_the_body_declares_three_signals_and_holds_three_fragments(self):
         html = page('<main id="app"></main>', '<section id="epics"></section>', '<div id="tickets"></div>')
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', ticket: '', peek: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', peek: '', pin: '', pinat: '', now: Date.now() / 1000}\"", body)
         self.assertLess(html.index('id="app"'), html.index('id="tickets"'))
         self.assertLess(html.index('id="tickets"'), html.index('id="epics"'))
 
@@ -304,7 +320,7 @@ class MarkupTest(unittest.TestCase):
         strip, lists = board(EPIC + [ticket("lone", status="in_progress")],
                              [thread("t1", "ter-69s8: build")])
         classes = set()
-        for html in (strip, lists, ticket_body(EPIC[1]), ticket_peek(EPIC[1]), ticket_peek(EPIC[0]), board([])[0]):
+        for html in (strip, lists, ticket_peek(EPIC[4], pinned=True), ticket_peek(EPIC[1]), ticket_peek(EPIC[0]), board([])[0]):
             c = check(html)
             self.assertEqual(c.errors, [])
             classes |= c.classes
@@ -313,7 +329,7 @@ class MarkupTest(unittest.TestCase):
 
     def test_ticket_text_is_escaped(self):
         strip, lists = board([ticket("x", "<b>t</b>", "in_progress", body="<script>", tags=["<i>"])])
-        for html in (strip, lists, ticket_body(ticket("x", body="<script>")),
+        for html in (strip, lists, ticket_peek(ticket("x", body="<script>", notes=[(1, "<script>")]), pinned=True),
                      ticket_peek(ticket("x", "<b>t</b>", body="<script>"))):
             self.assertNotIn("<script>", html)
             self.assertNotIn("<b>t", html)

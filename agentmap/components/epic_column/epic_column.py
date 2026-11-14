@@ -16,8 +16,8 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
     """One group in the epic strip: its title, counts, progress bar, agents and newest change.
 
     A click opens the group's ticket list in place of the event log. The column
-    and each ticket in it are ticket marks: a hover focuses their threads, and a
-    hover on a ticket also opens its hover box.
+    and each ticket in it are ticket marks: a hover focuses their threads. A
+    hover on a ticket also opens its hover box, and a click pins the box.
     """
     states = [ticket_state(t, tickets) for t in group.members]
     workers = group_threads(group, links, forest)
@@ -28,7 +28,7 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
     root = group.root
     working = [t for t in group.members if t.status == "in_progress"]
     return render("epic_column", {
-        "now": [{"id": t.id, "title": t.title, **_link(links.get(t.id, []), forest, t.id),
+        "now": [{"id": t.id, "title": t.title, **_link(links.get(t.id, []), forest, t.id, "c"),
                  "agents": [agent_chip(forest.tag[a], forest.hue[a]) for a in links.get(t.id, [])]}
                 for t in working[:NOW_MAX]],
         "more": len(working) - NOW_MAX if len(working) > NOW_MAX else 0,
@@ -49,9 +49,10 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
     })
 
 
-def _link(workers: list[str], forest: Forest, ticket_id: str | None = None) -> dict:
+def _link(workers: list[str], forest: Forest, ticket_id: str | None = None, place: str = "") -> dict:
     """The `{{> link}}` data of a mark that these threads work on."""
-    return link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ticket_id)
+    return link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None,
+                     ticket_id, place)
 
 
 def _ago(delta) -> str:
