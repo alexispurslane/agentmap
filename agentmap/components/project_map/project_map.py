@@ -17,6 +17,8 @@ MAP_H = 600.0
 SLOT_DX = 46.0
 SLOT_DY = 30.0
 SLOTS_PER_ROW = 4
+# Two cell edges closer than this, in map px, are the same edge.
+EDGE_EPS = 0.01
 # How far a slot keeps from the cell's edges: sides, top (under the label), bottom.
 INSET_X, INSET_TOP, INSET_BOTTOM = 14.0, 22.0, 10.0
 
@@ -77,8 +79,19 @@ def project_map(cells: list[Cell], forest: Forest) -> str:
         if t.state in ("working", "needs_you"):
             busy.add(visits[t.id][0][0].key)
 
+    # Each divider is drawn once, by the cell right of it or below it. A cell on
+    # the left or top edge of its group (the map, or its parent's area under the
+    # label) draws no line there: the group's own edge is that line.
+    group = {c.key: c.key.split("/")[0] if c.depth == 2 else "" for c in cells}
+    left, top = defaultdict(lambda: math.inf), defaultdict(lambda: math.inf)
+    for c in cells:
+        left[group[c.key]] = min(left[group[c.key]], c.x)
+        top[group[c.key]] = min(top[group[c.key]], c.y)
+
     return render("project_map", {
         "cells": [{"id": element_id("c", c.key), "key": c.key, "depth": c.depth,
+                   "line_l": c.x > left[group[c.key]] + EDGE_EPS,
+                   "line_t": c.y > top[group[c.key]] + EDGE_EPS,
                    "label": "files" if c.label == "." else c.label, "busy": c.key in busy,
                    "x": round(100 * c.x / MAP_W, 3), "y": round(100 * c.y / MAP_H, 3),
                    "w": round(100 * c.w / MAP_W, 3), "h": round(100 * c.h / MAP_H, 3)}

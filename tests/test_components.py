@@ -495,6 +495,21 @@ class MapTest(unittest.TestCase):
         html = render([], cells=[Cell("src", "src", 1, MAP_W / 4, MAP_H / 2, MAP_W / 2, MAP_H / 2, 1)])
         self.assertIn('data-cell="src" style="left:25.0%;top:50.0%;width:50.0%;height:50.0%"', html)
 
+    def test_each_divider_is_drawn_once_by_the_cell_right_of_it_or_below_it(self):
+        # Two directories side by side above a third; the first has two
+        # subdirectories side by side above a third, under its label band.
+        cells = [Cell("a", "a", 1, 0, 0, 540, 300, 1),
+                 Cell("a/p", "p", 2, 0, 16, 270, 142, 1),
+                 Cell("a/q", "q", 2, 270, 16, 270, 142, 1),
+                 Cell("a/r", "r", 2, 0, 158, 540, 142, 1),
+                 Cell("b", "b", 1, 540, 0, 540, 300, 1),
+                 Cell("c", "c", 1, 0, 300, 1080, 300, 1)]
+        html = render([], cells=cells)
+        lines = {key: tuple(sorted(re.findall(r"\b(line-[lt])\b", cls)))
+                 for cls, key in re.findall(r'<div class="cell ([^"]*)"[^>]*data-cell="([^"]+)"', html)}
+        self.assertEqual(lines, {"a": (), "a/p": (), "a/q": ("line-l",), "a/r": ("line-t",),
+                                 "b": ("line-l",), "c": ("line-t",)})
+
     def test_a_cell_of_files_directly_in_a_directory_is_labeled_files(self):
         html = render([], cells=[Cell("src/.", ".", 2, 0, 0, 100, 100, 1)])
         self.assertIn('<span class="label">files</span>', html)
@@ -552,8 +567,8 @@ class MapTest(unittest.TestCase):
 
     def test_a_cell_with_working_or_asking_threads_is_busy(self):
         html = render([thread("w", touched=["docs/a"]), thread("i", state="idle", touched=["src/a/x"])])
-        self.assertRegex(html, r'class="cell d1 busy"[^>]*data-cell="docs"')
-        self.assertRegex(html, r'class="cell d2"[^>]*data-cell="src/a"')
+        self.assertRegex(html, r'class="cell d1(?: line-[lt])* busy"[^>]*data-cell="docs"')
+        self.assertRegex(html, r'class="cell d2(?: line-[lt])*"[^>]*data-cell="src/a"')
 
     def test_a_dot_links_to_its_row_through_the_hover_signal(self):
         html = render([thread("t", touched=["docs/a"])])

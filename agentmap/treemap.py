@@ -1,7 +1,10 @@
 """The project map: a two-level ordered strip treemap of the project's code.
 
-Each cell is a rectangle whose area is in proportion to the number of lines of
-code under it.
+Each cell is a rectangle whose area is in proportion to the weight of the
+files under it. A file's weight is its compressed size, a measure of how much
+information it holds: repetitive code weighs little, dense code weighs much.
+Prose and data hold more bytes per idea than code, so they count less (see
+`file_weight`).
 
 - Level 1 has one cell per top-level directory, plus the cell `.` for the files
   directly in the root.
@@ -10,7 +13,7 @@ code under it.
   directly in that directory.
 - A cell whose weight is under `MIN_SHARE` of the whole project's weight joins
   one `…` cell (key `…` at level 1, `<dir>/…` at level 2). The `…` cell comes
-  last in its level. A `…` cell of zero lines is left out.
+  last in its level. A `…` cell of zero weight is left out.
 
 The layout is the ordered strip treemap of Bederson, Shneiderman and Wattenberg
 (2002), "Ordered and quantum treemaps". Items keep their name order. They fill
@@ -24,15 +27,22 @@ import dataclasses
 import os
 import pathlib
 import subprocess
+import zlib
 
-# A cell under this share of the whole project's lines joins its level's `…` cell.
+# A cell under this share of the whole project's weight joins its level's `…` cell.
 MIN_SHARE = 0.015
 # Default height, in CSS px, of the band at the top of each level-1 cell that
 # holds its label. Level-2 cells fill the rest of the level-1 cell.
 LABEL_INSET = 16.0
+# A file's weight is its zlib (gzip) size at this level, times the factor of its kind.
+COMPRESS_LEVEL = 6
+PROSE_FACTOR = 0.25
+DATA_FACTOR = 0.5
+PROSE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".rst", ".adoc", ".org"})
+DATA_SUFFIXES = frozenset({".json", ".log", ".csv", ".tsv", ".jobs"})
 # Directories that the walk outside git skips, besides hidden ones.
 SKIPPED_DIRS = frozenset({"node_modules", "target", "build"})
-# A file with a NUL byte in this many first bytes is binary and counts 0 lines.
+# A file with a NUL byte in this many first bytes is binary and weighs 0.
 BINARY_PROBE = 8192
 ELLIPSIS = "…"
 ROOT_FILES = "."
@@ -45,7 +55,7 @@ class Cell:
     key: `src`, `.`, `…` at level 1; `src/render`, `src/.`, `src/…` at level 2.
     label: the last part of the key.
     depth: 1 or 2.
-    weight: the number of lines of code under the cell.
+    weight: the sum of the weights of the files under the cell (see `file_weight`).
     """
 
     key: str
@@ -58,25 +68,55 @@ class Cell:
     weight: int
 
 
-def code_weights(root: pathlib.Path) -> dict[str, int]:
-    """Map each file path, relative to `root` with `/` separators, to its line count.
+def code_weights(root: pathlib.Path, cache: dict | None = None) -> dict[str, int]:
+    """Map each file path, relative to `root` with `/` separators, to its weight.
 
     In a git repository, the files are the tracked files plus the new files
     that git does not ignore. Elsewhere,
     a walk lists them and skips hidden directories and `SKIPPED_DIRS`. A listed
     path that is not a readable file is left out.
+
+    `cache` maps a path to (size, modification time in ns, weight). A file
+    whose size and time match its entry is not read again. The call drops the
+    entries of files that it did not find.
     """
     root = pathlib.Path(root)
     paths = _git_files(root)
     if paths is None:
         paths = _walk_files(root)
+    cache = {} if cache is None else cache
     weights = {}
     for rel in paths:
         try:
-            weights[rel] = _count_lines(root / rel)
+            st = os.stat(root / rel)
+            hit = cache.get(rel)
+            if hit and hit[:2] == (st.st_size, st.st_mtime_ns):
+                weights[rel] = hit[2]
+                continue
+            weights[rel] = file_weight(rel, (root / rel).read_bytes())
         except OSError:
             continue
+        cache[rel] = (st.st_size, st.st_mtime_ns, weights[rel])
+    for gone in cache.keys() - weights.keys():
+        del cache[gone]
     return weights
+
+
+def file_weight(rel: str, data: bytes) -> int:
+    """The weight of the file `rel` with the bytes `data`.
+
+    It is the zlib size of the bytes, times PROSE_FACTOR for prose (by
+    suffix, such as `.md`), times DATA_FACTOR for data (such as `.json`), and
+    rounded. An empty file weighs 0. A file with a NUL byte in its first
+    BINARY_PROBE bytes is binary, such as an image, and weighs 0: agents do
+    not read or edit it, and its bytes are compressed already.
+    """
+    if not data or b"\0" in data[:BINARY_PROBE]:
+        return 0
+    suffix = pathlib.PurePath(rel).suffix.lower()
+    factor = (PROSE_FACTOR if suffix in PROSE_SUFFIXES
+              else DATA_FACTOR if suffix in DATA_SUFFIXES else 1.0)
+    return round(len(zlib.compress(data, COMPRESS_LEVEL)) * factor)
 
 
 def _git_files(root):
@@ -101,19 +141,6 @@ def _walk_files(root):
     return paths
 
 
-def _count_lines(path):
-    with open(path, "rb") as f:
-        head = f.read(BINARY_PROBE)
-        if b"\0" in head:
-            return 0
-        lines = head.count(b"\n")
-        last = head[-1:]
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            lines += chunk.count(b"\n")
-            last = chunk[-1:]
-    return lines + (last not in (b"", b"\n"))
-
-
 def build_cells(
     weights: dict[str, int],
     width: float,
@@ -130,12 +157,12 @@ def build_cells(
     if total <= 0:
         return []
     groups = {}
-    for path, lines in weights.items():
+    for path, weight in weights.items():
         parts = path.split("/")
         top = parts[0] if len(parts) > 1 else ROOT_FILES
         sub = parts[1] if len(parts) > 2 else ROOT_FILES
         subs = groups.setdefault(top, {})
-        subs[sub] = subs.get(sub, 0) + lines
+        subs[sub] = subs.get(sub, 0) + weight
 
     level1 = _join_small({top: sum(subs.values()) for top, subs in groups.items()}, total)
     cells = []

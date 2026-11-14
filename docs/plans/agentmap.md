@@ -255,14 +255,14 @@ An event is one dated fact about one thread. The page uses events for its runnin
 ### treemap.py: the project map
 
 ```python
-def code_weights(root: pathlib.Path) -> dict[str, int]: ...   # relative file path -> line count
+def code_weights(root: pathlib.Path, cache: dict | None = None) -> dict[str, int]: ...   # relative file path -> weight
 def build_cells(weights: dict[str, int], width: float, height: float) -> list[Cell]: ...
 def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 ```
 
 `Cell` is a frozen dataclass: `Cell(key, label, depth, x, y, w, h, weight)`.
 
-- `code_weights` lists files with `git ls-files -z --cached --others --exclude-standard`. Thus a new file that an agent creates shows before anyone commits it. If the root is not a git repository, it walks the tree and skips hidden directories, `node_modules`, `target` and `build`. A file with a NUL byte in its first 8 KiB counts 0 lines.
+- `code_weights` lists files with `git ls-files -z --cached --others --exclude-standard`. Thus a new file that an agent creates shows before anyone commits it. If the root is not a git repository, it walks the tree and skips hidden directories, `node_modules`, `target` and `build`. A file's weight is its zlib size at level 6, a measure of the information that it holds. Prose files (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`, `.org`) count a quarter of it, and data files (`.json`, `.log`, `.csv`, `.tsv`, `.jobs`) count a half. A line of prose holds about 3.5 times the compressed bytes of a line of code, so a quarter keeps prose at about the share of the map that line counts gave it. An empty file, and a file with a NUL byte in its first 8 KiB, weigh 0. The `cache` keeps each file's weight by its size and modification time, so a refresh compresses only the files that changed.
 - The map has two levels. Level 1 is each top-level directory. All files directly in the root form one cell with the key `.`. Level 2 is each subdirectory of a top-level directory, plus one cell for the files directly in it, with the key `<dir>/.`.
 - Order: in each level, cells are sorted by name. The layout is an ordered strip treemap (Bederson, Shneiderman and Wattenberg, 2002). The method keeps the name order. Thus, when sizes change, a directory stays in about the same place. The method was made for ordered data that changes over time, at tens to thousands of items. Our maps have about 10 to 60 cells, so the method fits.
 - A level-2 cell under 1.5 % of the map area joins one `…` cell in its parent. A level-1 cell under 1.5 % joins one `…` cell at level 1.

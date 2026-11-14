@@ -82,11 +82,20 @@ body {
 
 /* Map */
 .map-box { position: relative; width: 100%; aspect-ratio: 1080 / 600; background: #fafaf9; }
-.cell { position: absolute; border: 1px solid var(--rule-soft); }
-.cell.d1 { border-color: var(--rule); }
-.cell .label { position: absolute; left: 5px; top: 2px; font-size: 13px; font-weight: 600; color: #6b6b6b; white-space: nowrap; }
-.cell.d2 .label { font-weight: 400; font-size: 12px; color: #8a8a8a; }
-.cell.busy { background: #fff; }
+/* Each divider is drawn once: a cell draws only its left and top lines, and
+   only where it has a neighbor (line-l, line-t; see project_map). The other
+   borders are transparent, and the background stops inside them, so that a
+   busy cell never covers its parent's line. A directory's line is darker
+   than a subdirectory's. */
+.cell { position: absolute; border: 1px solid transparent; background-clip: padding-box; }
+.cell.line-l { border-left-color: var(--rule-soft); }
+.cell.line-t { border-top-color: var(--rule-soft); }
+.cell.d1.line-l { border-left-color: #a9a9a6; }
+.cell.d1.line-t { border-top-color: #a9a9a6; }
+/* A directory's label fits its 16 px band (treemap.LABEL_INSET). */
+.cell .label { position: absolute; left: 5px; top: 1px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 14px; font-weight: 600; color: #6b6b6b; white-space: nowrap; }
+.cell.d2 .label { top: 3px; font-weight: 400; font-size: 12px; line-height: 14px; color: #8a8a8a; }
+.cell.busy { background-color: #fff; }
 .routes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 /* --fade squared is the age over an hour, so a route segment loses opacity at a
    steady rate and is gone after an hour. */

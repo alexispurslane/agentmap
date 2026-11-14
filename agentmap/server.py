@@ -167,6 +167,8 @@ class CellCache:
         self.every = every
         self.cells: list[Cell] = []
         self._anchors: frozenset[str] = frozenset()
+        # The weight of each file by size and time, so that a refresh reads only changed files.
+        self._weights: dict = {}
 
     def __call__(self) -> list[Cell]:
         return self.cells
@@ -175,7 +177,7 @@ class CellCache:
         return self._anchors
 
     def refresh(self) -> None:
-        weights = code_weights(self.root)
+        weights = code_weights(self.root, self._weights)
         self.cells = build_cells(weights, MAP_W, MAP_H)
         self._anchors = anchors(weights)
 

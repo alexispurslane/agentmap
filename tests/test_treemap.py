@@ -5,8 +5,14 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+import zlib
 
 from agentmap.treemap import Cell, build_cells, code_weights, locate
+
+
+def gz(data, factor=1.0):
+    """The weight of a text file with these bytes: its deflate size times `factor`, rounded."""
+    return round(len(zlib.compress(data, 6)) * factor) if data else 0
 
 W, H = 1080.0, 600.0
 EPS = 1e-6
@@ -365,31 +371,71 @@ class CodeWeightsTest(unittest.TestCase):
         subprocess.run(["git", *args], cwd=self.root, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def test_code_weights_counts_the_lines_of_each_file(self):
+    def test_a_files_weight_is_its_compressed_size(self):
         write(self.root, "a.py", b"one\ntwo\nthree\n")
-        write(self.root, "src/b.py", b"one\ntwo")  # no final newline
         write(self.root, "src/empty.py", b"")
-        self.assertEqual(code_weights(self.root),
-                         {"a.py": 3, "src/b.py": 2, "src/empty.py": 0})
+        self.assertEqual(code_weights(self.root), {"a.py": gz(b"one\ntwo\nthree\n"), "src/empty.py": 0})
+
+    def test_repetitive_text_weighs_less_than_varied_text_of_the_same_length(self):
+        write(self.root, "same.py", b"x = 1\n" * 400)
+        write(self.root, "varied.py", b"".join(b"v%d = %d\n" % (i, i * 7919 % 1000) for i in range(400))[:2400])
+        weights = code_weights(self.root)
+        self.assertLess(weights["same.py"] * 5, weights["varied.py"])
+
+    def test_prose_files_weigh_a_quarter_of_their_compressed_size(self):
+        text = b"An agent writes long lines of prose about its plan. " * 40
+        for name in ("a.md", "b.markdown", "c.txt", "d.rst", "e.adoc", "f.org", "G.MD"):
+            write(self.root, name, text)
+        write(self.root, "code.py", text)
+        weights = code_weights(self.root)
+        self.assertEqual(weights["code.py"], gz(text))
+        for name in ("a.md", "b.markdown", "c.txt", "d.rst", "e.adoc", "f.org", "G.MD"):
+            self.assertEqual(weights[name], gz(text, 0.25), name)
+
+    def test_data_files_weigh_half_of_their_compressed_size(self):
+        text = b'{"run": 1, "ms": 16.6, "rays": 4096}\n' * 40
+        for name in ("r.json", "r.log", "r.csv", "r.tsv", "r.jobs"):
+            write(self.root, name, text)
+        weights = code_weights(self.root)
+        for name in ("r.json", "r.log", "r.csv", "r.tsv", "r.jobs"):
+            self.assertEqual(weights[name], gz(text, 0.5), name)
 
     def test_binary_files_weigh_zero(self):
         write(self.root, "logo.png", b"\x89PNG\r\n\x00\x00\nmore\nlines\n")
         late_nul = b"line\n" * 2000 + b"\x00\n"  # NUL after the first 8 KiB
-        write(self.root, "late.txt", late_nul)
+        write(self.root, "late.py", late_nul)
         weights = code_weights(self.root)
         self.assertEqual(weights["logo.png"], 0)
-        self.assertEqual(weights["late.txt"], 2001)
+        self.assertEqual(weights["late.py"], gz(late_nul))
 
     def test_a_nul_byte_at_the_end_of_the_first_8_kib_makes_a_file_binary(self):
         write(self.root, "edge.bin", b"a" * 8191 + b"\x00" + b"\nx\n")
-        write(self.root, "past.txt", b"a" * 8192 + b"\x00" + b"\nx\n")
+        write(self.root, "past.py", b"a" * 8192 + b"\x00" + b"\nx\n")
         weights = code_weights(self.root)
         self.assertEqual(weights["edge.bin"], 0)
-        self.assertEqual(weights["past.txt"], 2)
+        self.assertEqual(weights["past.py"], gz(b"a" * 8192 + b"\x00" + b"\nx\n"))
 
-    def test_line_counts_span_reads_of_large_files(self):
-        write(self.root, "big.txt", b"x" * 100 + (b"y\n" * 300_000))
-        self.assertEqual(code_weights(self.root)["big.txt"], 300_000)
+    def test_a_cache_keeps_the_weight_of_a_file_whose_size_and_time_did_not_change(self):
+        cache = {}
+        write(self.root, "a.py", b"first\n")
+        stat = (self.root / "a.py").stat()
+        self.assertEqual(code_weights(self.root, cache), {"a.py": gz(b"first\n")})
+        # Same size and modification time: the cache answers without a new read.
+        write(self.root, "a.py", b"other\n")
+        os.utime(self.root / "a.py", ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.assertEqual(code_weights(self.root, cache), {"a.py": gz(b"first\n")})
+        # A new modification time makes it read the file again.
+        os.utime(self.root / "a.py", ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+        self.assertEqual(code_weights(self.root, cache), {"a.py": gz(b"other\n")})
+
+    def test_the_cache_forgets_files_that_left_the_project(self):
+        cache = {}
+        write(self.root, "a.py", b"a\n")
+        write(self.root, "b.py", b"b\n")
+        code_weights(self.root, cache)
+        os.remove(self.root / "b.py")
+        code_weights(self.root, cache)
+        self.assertEqual(set(cache), {"a.py"})
 
     def test_in_a_git_repository_tracked_and_new_unignored_files_count(self):
         # An agent's new file shows on the map before anyone commits it.
@@ -401,9 +447,9 @@ class CodeWeightsTest(unittest.TestCase):
         write(self.root, "ignored.log", b"a\nb\nc\n")
         write(self.root, "node_modules/kept.js", b"a\n")
         self.git("add", "tracked.py", "dir with space/t.py", "node_modules/kept.js")
-        self.assertEqual(code_weights(self.root),
-                         {".gitignore": 1, "tracked.py": 2, "dir with space/t.py": 1,
-                          "untracked.py": 2, "node_modules/kept.js": 1})
+        self.assertEqual(set(code_weights(self.root)),
+                         {".gitignore", "tracked.py", "dir with space/t.py",
+                          "untracked.py", "node_modules/kept.js"})
 
     def test_tracked_files_missing_from_the_working_tree_are_skipped(self):
         self.git("init", "-q")
@@ -411,7 +457,7 @@ class CodeWeightsTest(unittest.TestCase):
         write(self.root, "gone.py", b"a\n")
         self.git("add", "kept.py", "gone.py")
         os.remove(self.root / "gone.py")
-        self.assertEqual(code_weights(self.root), {"kept.py": 1})
+        self.assertEqual(code_weights(self.root), {"kept.py": gz(b"a\n")})
 
     def test_outside_git_the_walk_skips_hidden_and_build_directories(self):
         write(self.root, "src/a.py", b"a\n")
@@ -420,8 +466,8 @@ class CodeWeightsTest(unittest.TestCase):
                         "src/node_modules", "src/.cache", "src/build"):
             write(self.root, f"{skipped}/x.py", b"a\n")
         write(self.root, "src/builder/b.py", b"a\nb\n")
-        self.assertEqual(code_weights(self.root),
-                         {"src/a.py": 1, ".hidden_file": 1, "src/builder/b.py": 2})
+        self.assertEqual(set(code_weights(self.root)),
+                         {"src/a.py", ".hidden_file", "src/builder/b.py"})
 
     def test_outside_git_the_walk_uses_forward_slash_relative_paths(self):
         write(self.root, "a/b/c.txt", b"x\n")

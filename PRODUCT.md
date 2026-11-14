@@ -34,7 +34,7 @@ agentmap joins three views of the same threads that neither Claude Code nor Code
 - Per thread: a tag (A, A1, A1.2), a title, the provider and model, and a state (working, needs you, idle, failed).
 - Also per thread: an age, the current action ("now line"), the newest thought, the first sentence of its last message, and up to 8 recently touched files.
 - Per ticket group: the epic's title and counts, and its unfinished tickets with their metadata and rendered text. See `docs/plans/ticket-bar.md`.
-- The map is an ordered strip treemap of the project's directories, two levels deep, sized by lines of code.
+- The map is an ordered strip treemap of the project's directories, two levels deep, sized by how much information the files hold: their compressed size, with prose at a quarter and data at a half.
 - The backend uses the Python 3 standard library and a vendored Mustache engine. The frontend is Datastar 1.0.5 and one CSS file, with no build step.
 - The structure, information, and functionality must stay. A redesign changes how they look and read.
 
