@@ -2,6 +2,8 @@
 name = "agentmap"
 version = "0.1.0"
 requires-python = ">=3.14"
+license = "0BSD"
+description = "A live portrait dashboard of what the agent threads of a T3 Code project do"
 dependencies = []
 
 [tool.mutmut]
