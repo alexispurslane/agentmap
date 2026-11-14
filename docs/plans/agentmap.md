@@ -266,7 +266,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 - `components/view.py` holds the facts that several components share: the ownership tree (`Forest`), tags, hues, the ink ramp of ages (`a0` to `a4`), the summary line, and the rule that hides settled subagents.
 - `page` returns the whole document. `app` returns `<main id="app">` with the rail, the map, the agent tree and the event log.
 - Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°).
-- A dot, a row and a log entry are linked by the frontend signal `$hover`.
+- Every mark is linked through the focus: the signals `$focus` (a set of thread tags) and `$hue`. A thread mark (dot, route, row, event, chip) uses `{{> hover}}`. A ticket mark (epic column, ticket, ticket row) uses `{{> link}}`. See `docs/plans/live-tickets.md`.
 - Map routes and agent rows fade in real time. The page keeps the Unix time in the signal `$now` and sets it every 10 seconds. The `fade` component gives a mark the attribute `data-style:--fade`. Its value grows from 0 at the mark's time to 1 after an hour, as the square root of the age.
 - In the CSS, a route segment and a stop lose opacity at a steady rate (`1 - --fade²`) and are gone after an hour. The newest segment, the one that ends at the dot, does not fade and has the full color of the thread. A hover on a thread draws its whole route at full color.
 - An agent row's title and summary text mix from full ink to grey with `--fade`. Its tag badge gets a little lighter and less saturated, so that the tags stay readable and distinct.

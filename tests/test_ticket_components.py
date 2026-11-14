@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from agentmap.components import epic_strip, page, ticket_body, ticket_lists, ticket_peek
 from agentmap.components.close.close import close
-from agentmap.components.peek.peek import peek
+from agentmap.components.link.link import link
 from agentmap.components.view import Forest, element_id, ticket_agents
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
@@ -57,9 +57,13 @@ EPIC = [
 ]
 
 
-# The attributes of a ticket that a hover peeks at.
-PEEK = ('data-on:mouseenter="$peek = \'{dom}\'; @get(\'/peek/{url}\')" '
-        'data-on:mouseleave="$peek = \'\'"')
+# The attributes of a ticket mark that the thread A (hue 75.0) works on: a hover
+# focuses A and peeks at the ticket.
+PEEK = ('data-on:mouseover__stop="$focus = \' A \'; $hue = \'75.0\'; '
+        '$peek == \'{dom}\' || ($peek = \'{dom}\', @get(\'/peek/{url}\'))" '
+        'data-on:mouseleave="$focus = \'\'; $peek = \'\'" '
+        'data-class:hl="$focus.includes(\' A \')"')
+WORKER = [thread("t1", "ter-69s8: build the cap")]
 
 
 def column(strip, key):
@@ -109,7 +113,7 @@ class EpicStripTest(unittest.TestCase):
         self.assertIn('<span class="now-more">and 3 more</span>', col)
 
     def test_hovering_a_ticket_in_progress_peeks_at_it(self):
-        col = column(board(EPIC)[0], "ter-89xq")
+        col = column(board(EPIC, WORKER)[0], "ter-89xq")
         dom = element_id("t", "ter-69s8")
         self.assertIn(f'<span class="now-item" {PEEK.format(dom=dom, url="ter-69s8")}>', col)
 
@@ -156,12 +160,29 @@ class AgentLinkTest(unittest.TestCase):
     def test_the_column_and_the_row_show_the_linked_agents_tags(self):
         strip, lists = board(EPIC, [thread("t1", "ter-69s8: build the cap")])
         for html in (column(strip, "ter-89xq"), row(lists, "ter-69s8")):
-            self.assertRegex(html, r'<span class="tag" style="--hue:75.0" data-on:mouseenter="\$hover = \'A\'"')
+            self.assertRegex(html, r'<span class="tag" style="--hue:75.0" data-on:mouseover__stop="\$focus = \' A \'')
         self.assertNotIn('class="tag"', row(lists, "ter-bqun"))
 
     def test_a_thread_that_names_the_epic_counts_for_its_column(self):
         strip, _ = board(EPIC, [thread("t1", "ter-89xq: orchestrate")])
-        self.assertIn("$hover = 'A'", column(strip, "ter-89xq"))
+        self.assertIn("$focus = ' A '", column(strip, "ter-89xq"))
+
+    def test_hovering_an_epic_column_focuses_the_agents_that_work_on_it(self):
+        strip, _ = board(EPIC, [thread("t1", "ter-69s8: build"), thread("t2", "ter-bqun: wait", created=50)])
+        self.assertIn('id="' + element_id("g", "ter-89xq") + '" data-on:mouseover__stop='
+                      '"$focus = \' A B \'; $hue = \'75.0\'" data-on:mouseleave="$focus = \'\'" '
+                      'data-class:hl="$focus.includes(\' A \') || $focus.includes(\' B \')"', column(strip, "ter-89xq"))
+
+    def test_a_ticket_mark_without_agents_focuses_nothing_and_never_lights(self):
+        r = row(board(EPIC)[1], "ter-bqun")
+        self.assertIn('data-on:mouseover__stop="$focus = \'\'; $hue = \'\';', r)
+        self.assertIn('data-class:hl="false"', r)
+
+    def test_ticket_marks_light_in_the_hue_of_the_focused_agent(self):
+        for mark in (".epic.hl", ".now-item.hl", ".tk-head.hl"):
+            rule = re.search(re.escape(mark) + r"[^{]*\{([^}]*)\}", CSS)
+            self.assertIsNotNone(rule, mark)
+            self.assertIn("var(--focus-hue)", rule.group(1))
 
 
 class TicketListTest(unittest.TestCase):
@@ -188,7 +209,7 @@ class TicketListTest(unittest.TestCase):
 
     def test_hovering_a_row_peeks_at_its_ticket(self):
         dom = element_id("t", "ter-69s8")
-        self.assertIn(PEEK.format(dom=dom, url="ter-69s8"), row(board(EPIC)[1], "ter-69s8"))
+        self.assertIn(PEEK.format(dom=dom, url="ter-69s8"), row(board(EPIC, WORKER)[1], "ter-69s8"))
 
     def test_a_row_shows_its_note_count_and_newest_note_age(self):
         self.assertIn('<span class="notes a2">2 notes · 5m ago</span>', row(board(EPIC)[1], "ter-aaaa"))
@@ -251,8 +272,8 @@ class TicketPeekTest(unittest.TestCase):
     def test_a_ticket_without_a_description_peeks_with_its_title_and_says_so(self):
         self.assertIn('<p class="empty">No description.</p>', ticket_peek(ticket("x")))
 
-    def test_the_peek_attributes_quote_the_id_in_the_url(self):
-        self.assertEqual(peek("odd'id"), PEEK.format(dom=element_id("t", "odd'id"), url="odd%27id"))
+    def test_the_link_attributes_quote_the_id_in_the_url(self):
+        self.assertEqual(link(["A"], 75.0, "odd'id"), PEEK.format(dom=element_id("t", "odd'id"), url="odd%27id"))
 
     def test_the_peek_box_is_placed_next_to_the_hovered_ticket_by_css_anchors(self):
         # The element under the pointer is the anchor. A ticket can show in its
@@ -273,7 +294,7 @@ class PageTest(unittest.TestCase):
     def test_the_body_declares_three_signals_and_holds_three_fragments(self):
         html = page('<main id="app"></main>', '<section id="epics"></section>', '<div id="tickets"></div>')
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: '', peek: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', ticket: '', peek: '', now: Date.now() / 1000}\"", body)
         self.assertLess(html.index('id="app"'), html.index('id="tickets"'))
         self.assertLess(html.index('id="tickets"'), html.index('id="epics"'))
 

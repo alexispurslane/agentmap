@@ -1,6 +1,6 @@
 ---
 id: age-832i
-status: in_progress
+status: closed
 deps: [age-1l9c]
 links: []
 created: 2026-11-14T18:34:49Z

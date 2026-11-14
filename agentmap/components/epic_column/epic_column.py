@@ -3,7 +3,7 @@ from datetime import datetime
 
 from agentmap.components._template import render
 from agentmap.components.agent_chip.agent_chip import agent_chip
-from agentmap.components.peek.peek import peek_data
+from agentmap.components.link.link import link_data
 from agentmap.components.view import Forest, age_class, format_age, group_key, group_threads, element_id, ticket_state
 from agentmap.tickets import Group, Ticket
 
@@ -15,10 +15,12 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
                 forest: Forest, now: datetime) -> str:
     """One group in the epic strip: its title, counts, progress bar, agents and newest change.
 
-    A click opens the group's ticket list in place of the event log. A hover on
-    a ticket in progress opens that ticket's hover box.
+    A click opens the group's ticket list in place of the event log. The column
+    and each ticket in it are ticket marks: a hover focuses their threads, and a
+    hover on a ticket also opens its hover box.
     """
     states = [ticket_state(t, tickets) for t in group.members]
+    workers = group_threads(group, links, forest)
     total = len(group.members) + group.closed
     active = states.count("in_progress")
     newest = max([t.changed_at for t in group.members]
@@ -26,7 +28,7 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
     root = group.root
     working = [t for t in group.members if t.status == "in_progress"]
     return render("epic_column", {
-        "now": [{"id": t.id, "title": t.title, **peek_data(t.id),
+        "now": [{"id": t.id, "title": t.title, **_link(links.get(t.id, []), forest, t.id),
                  "agents": [agent_chip(forest.tag[a], forest.hue[a]) for a in links.get(t.id, [])]}
                 for t in working[:NOW_MAX]],
         "more": len(working) - NOW_MAX if len(working) > NOW_MAX else 0,
@@ -40,10 +42,16 @@ def epic_column(group: Group, tickets: Mapping[str, Ticket], links: Mapping[str,
         "closed": group.closed,
         "done_pct": round(100 * group.closed / total, 1),
         "active_pct": round(100 * active / total, 1),
-        "agents": [agent_chip(forest.tag[t], forest.hue[t]) for t in group_threads(group, links, forest)],
+        "agents": [agent_chip(forest.tag[t], forest.hue[t]) for t in workers],
+        **_link(workers, forest),
         "age": age_class(now, newest),
         "changed": _ago(now - newest),
     })
+
+
+def _link(workers: list[str], forest: Forest, ticket_id: str | None = None) -> dict:
+    """The `{{> link}}` data of a mark that these threads work on."""
+    return link_data([forest.tag[t] for t in workers], forest.hue[workers[0]] if workers else None, ticket_id)
 
 
 def _ago(delta) -> str:

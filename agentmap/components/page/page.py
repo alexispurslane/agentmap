@@ -6,7 +6,7 @@ def page(app_html: str, epics_html: str, tickets_html: str) -> str:
 
     The body holds three fragments that the server patches apart:
     `<main id="app">`, `<div id="tickets">` and `<section id="epics">`. The
-    signals `$hover`, `$epic`, `$ticket`, `$peek` and `$now` live on `<body>`, outside
+    signals `$focus`, `$hue`, `$epic`, `$ticket`, `$peek` and `$now` live on `<body>`, outside
     every fragment, so an update keeps them. `$now` is the Unix time, which the
     page sets every 10 seconds so that marks fade in real time.
     """

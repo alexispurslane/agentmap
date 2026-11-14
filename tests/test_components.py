@@ -204,10 +204,10 @@ class TemplateTest(unittest.TestCase):
             # JavaScript string inside a double-quoted attribute, which is fine.
             self.assertNotRegex(text, r"[\w:-]='", name)
 
-    def test_the_hover_fragment_links_one_tag(self):
-        self.assertEqual(hover("A1", "mouseenter"),
-                         "data-on:mouseenter=\"$hover = 'A1'\" data-on:mouseleave=\"$hover = ''\" "
-                         "data-class:hl=\"$hover == 'A1'\"")
+    def test_a_thread_mark_focuses_its_thread_and_lights_while_it_is_in_focus(self):
+        self.assertEqual(hover("A1", 212.5, "mouseenter"),
+                         "data-on:mouseenter=\"$focus = ' A1 '; $hue = '212.5'\" data-on:mouseleave=\"$focus = ''\" "
+                         "data-class:hl=\"$focus.includes(' A1 ')\"")
 
 
 class FadeTest(unittest.TestCase):
@@ -233,7 +233,8 @@ class PageTest(unittest.TestCase):
     def test_the_page_opens_the_stream_and_declares_the_hover_signal_on_body(self):
         html = page('<main id="app"></main>', "", "")
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{hover: '', epic: '', ticket: '', peek: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', ticket: '', peek: '', now: Date.now() / 1000}\"", body)
+        self.assertIn('data-style:--focus-hue="$hue"', body)
         self.assertIn("data-init=\"@get('/stream', {openWhenHidden: true});", body)
         self.assertIn('src="/static/datastar.js"', html)
         self.assertIn('<link rel="stylesheet" href="/static/app.css">', html)
@@ -435,8 +436,8 @@ class AgentRowTest(unittest.TestCase):
 
     def test_a_row_links_to_its_dot_through_the_hover_signal(self):
         o = opening(render([thread("r", created=90), thread("k", "r")]), "A1")
-        self.assertIn("data-on:mouseover__stop=\"$hover = 'A1'\"", o)
-        self.assertIn("data-class:hl=\"$hover == 'A1'\"", o)
+        self.assertRegex(o, r"data-on:mouseover__stop=\"\$focus = ' A1 '; \$hue = '[0-9.]+'\"")
+        self.assertIn("data-class:hl=\"$focus.includes(' A1 ')\"", o)
 
 
 class MapTest(unittest.TestCase):
@@ -488,7 +489,7 @@ class MapTest(unittest.TestCase):
 
     def test_hovering_a_thread_lights_its_whole_route(self):
         html = render([thread("t", touched=["docs/a", "src/b/x"])])
-        self.assertIn('<g style="--hue:75.0" data-class:hl="$hover == \'A\'">', html)
+        self.assertIn('<g style="--hue:75.0" data-class:hl="$focus.includes(\' A \')">', html)
 
     def test_a_thread_that_touched_one_cell_has_a_dot_and_no_route(self):
         html = render([thread("t", touched=["docs/a", "docs/b"])])
@@ -506,7 +507,7 @@ class MapTest(unittest.TestCase):
 
     def test_a_dot_links_to_its_row_through_the_hover_signal(self):
         html = render([thread("t", touched=["docs/a"])])
-        self.assertRegex(html, r"<span data-on:mouseenter=\"\$hover = 'A'\"[^>]*class=\"dot working\"")
+        self.assertRegex(html, r"<span data-on:mouseenter=\"\$focus = ' A '; \$hue = '75.0'\"[^>]*class=\"dot working\"")
 
     def test_a_dot_carries_its_threads_state(self):
         html = render([thread("t", state="needs_you", touched=["docs/a"])])
@@ -541,7 +542,7 @@ class EventLogTest(unittest.TestCase):
 
     def test_an_entry_links_to_its_thread_through_the_hover_signal(self):
         html = render([thread("a")], events=[event("a", "status", 1, "G")])
-        self.assertIn("data-on:mouseenter=\"$hover = 'A'\"", section(html, "log"))
+        self.assertIn("data-on:mouseenter=\"$focus = ' A '; $hue = '75.0'\"", section(html, "log"))
 
 
 class RailTest(unittest.TestCase):

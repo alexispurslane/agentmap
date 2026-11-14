@@ -166,6 +166,8 @@ body {
   padding: 10px 12px; border-right: 1px solid var(--rule); cursor: pointer; color: var(--age-ink);
 }
 .epic:hover { background: #fafaf9; }
+.epic.hl { background: oklch(.97 .025 var(--focus-hue)); box-shadow: inset 0 -4px 0 oklch(.56 .17 var(--focus-hue)); }
+.now-item.hl { background: oklch(.93 .05 var(--focus-hue)); }
 .epic.sel { background: var(--red-soft); box-shadow: inset 0 4px 0 var(--red); }
 .epic:focus-visible, .tk-head:focus-visible, .close:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .ep-head { display: flex; gap: 8px; align-items: baseline; }
@@ -200,6 +202,7 @@ body {
 .tk { border-bottom: 1px solid var(--rule-soft); color: var(--age-ink); }
 .tk-head { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 10px; cursor: pointer; }
 .tk-head:hover { background: #fafaf9; }
+.tk-head.hl { background: oklch(.97 .025 var(--focus-hue)); box-shadow: inset 3px 0 0 oklch(.56 .17 var(--focus-hue)); }
 .tk-head.open { background: var(--panel); }
 .tk-title { font-weight: 700; font-size: 15px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .type { font-size: 12px; color: #737373; }
