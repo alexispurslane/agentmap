@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
-from agentmap.tickets import Group, Ticket, blocked_by
+from agentmap.tickets import Group, Ticket, blocked_by, groups
 
 # Each thread gets its own OKLCH hue. In order of creation, each hue is the
 # one before plus the golden angle, so threads close in that order get hues
@@ -202,13 +202,6 @@ def group_threads(group: Group, links: Mapping[str, list[str]], forest: Forest) 
     return [t.id for t in forest.walk() if t.id in ids]
 
 
-def ticket_state(ticket: Ticket, tickets: Mapping[str, Ticket]) -> str:
-    """"in_progress", "blocked" (a dependency is not closed) or "ready"."""
-    if ticket.status == "in_progress":
-        return "in_progress"
-    return "blocked" if blocked_by(ticket, tickets) else "ready"
-
-
 def named_ids(text: str, ids: Collection[str]) -> list[str]:
     """The ids in `ids` that the text names as whole words, in order of first mention."""
     return [w for w in dict.fromkeys(w.rstrip("-_") for w in _WORD.findall(text)) if w in ids]
@@ -230,3 +223,50 @@ def title_without(title: str, ids: Collection[str]) -> str:
     text = re.sub(r"\(\s*\)|\[\s*\]", "", text)
     text = _TITLE_EDGES.sub("", re.sub(r"\s{2,}", " ", text))
     return text or title
+
+
+# A ticket in progress that changed within this time is live without an agent.
+RECENT = timedelta(hours=24)
+
+# The tiers of a ticket list, most relevant first. See `ticket_tier`.
+TIERS = ("agent", "recent", "ready", "blocked", "stale")
+
+
+def ticket_tier(ticket: Ticket, tickets: Mapping[str, Ticket], links: Mapping[str, list[str]],
+                now: datetime) -> str:
+    """The tier of a ticket in its group's list.
+
+    "agent": a shown thread names it. "recent": in progress, changed within
+    RECENT. "stale": in progress but neither, a claim that nobody works on.
+    Otherwise "blocked" (a dependency is not closed) or "ready". The tk status
+    is the claim that an agent stored; the agent link is the work.
+    """
+    if ticket.id in links:
+        return "agent"
+    if ticket.status == "in_progress":
+        return "recent" if now - ticket.changed_at <= RECENT else "stale"
+    return "blocked" if blocked_by(ticket, tickets) else "ready"
+
+
+def tiered(members, tickets: Mapping[str, Ticket], links: Mapping[str, list[str]],
+           now: datetime) -> dict[str, list[Ticket]]:
+    """The members by tier, each tier in the members' order."""
+    found: dict[str, list[Ticket]] = {name: [] for name in TIERS}
+    for t in members:
+        found[ticket_tier(t, tickets, links, now)].append(t)
+    return found
+
+
+def active_groups(tickets: Mapping[str, Ticket], links: Mapping[str, list[str]]) -> list[Group]:
+    """The groups on the board: those with a ticket that a thread names or that is in progress."""
+    return groups(tickets, active=lambda t: t.id in links or t.status == "in_progress")
+
+
+def ticket_path(ticket: Ticket, tickets: Mapping[str, Ticket], root_id: str | None) -> list[str]:
+    """The ids of the ticket's ancestors below the group's root, from the top down."""
+    path, seen = [], {ticket.id}
+    while ticket.parent in tickets and ticket.parent != root_id and ticket.parent not in seen:
+        ticket = tickets[ticket.parent]
+        seen.add(ticket.id)
+        path.append(ticket.id)
+    return path[::-1]

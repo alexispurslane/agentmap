@@ -24,9 +24,8 @@ from urllib.parse import unquote, urlsplit
 from agentmap import mcp
 from agentmap.components import app, epic_strip, page, ticket_lists, ticket_peek
 from agentmap.components.project_map.project_map import MAP_H, MAP_W
-from agentmap.components.view import Forest, ticket_agents
+from agentmap.components.view import Forest, active_groups, ticket_agents
 from agentmap.t3 import anchors
-from agentmap.tickets import groups
 from agentmap.treemap import Cell, build_cells, code_weights
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -138,7 +137,7 @@ class Dashboard:
         # tickets, the threads that work on them, or the ages may have changed.
         key = (links, {t: (forest.tag[t], forest.hue[t]) for ids in links.values() for t in ids})
         if tickets != self._last_tickets or key != self._last_ticket_key or due:
-            found = groups(tickets)
+            found = active_groups(tickets, links)
             fragments["epics"] = epic_strip(found, tickets, links, forest, now)
             fragments["tickets"] = ticket_lists(found, tickets, links, forest, now)
         self._last_render, self._last_statuses, self._last_cells = now, statuses, cells

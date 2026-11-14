@@ -15,7 +15,7 @@ So the board showed old claims, and it did not show the work.
 ## The model
 
 - Agent threads cause the work. The tk status is a claim that a ticket stores.
-- A live ticket is a ticket that a shown thread names (`ticket_agents`), or a ticket that changed in the last 24 hours.
+- A live ticket is a ticket that a shown thread names (`ticket_agents`), or a ticket in progress that changed in the last 24 hours.
 - A stale claim is a ticket in progress that is not live.
 - Every mark on the page belongs to a set of threads. A dot, a route, an agent row and an event belong to one thread. An epic column, a ticket row and a ticket badge belong to the threads that work on the ticket or the group.
 
@@ -59,4 +59,6 @@ A group's list puts the most relevant tier at the bottom, next to the epic strip
 
 A row in tiers 1 and 2 shows the path of parent ids from the group's root to the ticket. The list opens scrolled to the bottom.
 
-The epic strip shows each group with a live ticket or a stale claim. Groups with more agents come first. A column counts live tickets, ready, blocked, stale claims and closed. Its short list shows its live tickets.
+The epic strip shows each group with a ticket that a thread names or that is in progress (`active_groups`). Groups with more agents come first. A column counts live tickets, ready, blocked, stale claims and closed. Its short list shows its live tickets, those that agents work on first.
+
+The list column uses `flex-direction: column-reverse`, so the browser opens it scrolled to the bottom. Inside each tier, the rows keep the normal order, with the most relevant row last. The fold of stale claims uses the signal `$stale`, so a stream patch does not close it.

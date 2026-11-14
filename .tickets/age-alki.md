@@ -1,6 +1,6 @@
 ---
 id: age-alki
-status: in_progress
+status: closed
 deps: [age-nz5s]
 links: []
 created: 2026-11-14T18:34:50Z

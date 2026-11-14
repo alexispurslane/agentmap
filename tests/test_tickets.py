@@ -721,6 +721,10 @@ class Groups(unittest.TestCase):
                         epic("e3", "in_progress"), ticket("c", "closed", parent="e3"))
         self.assertEqual([g.root.id for g in groups(tickets)], ["e2"])
 
+    def test_a_rule_can_say_which_tickets_make_a_group_active(self):
+        tickets = by_id(epic("e1"), ticket("a", parent="e1"), epic("e2"), ticket("b", "in_progress", parent="e2"))
+        self.assertEqual([g.root.id for g in groups(tickets, active=lambda t: t.id == "a")], ["e1"])
+
     def test_tickets_without_an_epic_above_them_form_the_no_epic_group_last(self):
         tickets = by_id(ticket("loose", "in_progress", created=-10),
                         ticket("done", "closed"),

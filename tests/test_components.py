@@ -269,7 +269,7 @@ class PageTest(unittest.TestCase):
     def test_the_page_opens_the_stream_and_declares_the_hover_signal_on_body(self):
         html = page('<main id="app"></main>', "", "")
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', peek: '', pin: '', pinat: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', peek: '', pin: '', pinat: '', stale: false, now: Date.now() / 1000}\"", body)
         self.assertIn('data-style:--focus-hue="$hue"', body)
         self.assertIn("data-init=\"@get('/stream', {openWhenHidden: true});", body)
         self.assertIn('src="/static/datastar.js"', html)

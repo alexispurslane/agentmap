@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from agentmap.components import epic_strip, page, ticket_lists, ticket_peek
 from agentmap.components.close.close import close
 from agentmap.components.link.link import link
-from agentmap.components.view import Forest, element_id, ticket_agents
+from agentmap.components.view import Forest, active_groups, element_id, ticket_agents, ticket_tier
 from agentmap.status import Status
 from agentmap.t3 import AgentThread
 from agentmap.tickets import Group, Note, Ticket, groups
@@ -40,7 +40,7 @@ def board(tickets, threads=(), statuses=None):
     by_id = {t.id: t for t in tickets}
     forest = Forest(list(threads))
     links = ticket_agents(forest, statuses or {}, by_id.keys())
-    found = groups(by_id)
+    found = active_groups(by_id, links)
     return (epic_strip(found, by_id, links, forest, NOW),
             ticket_lists(found, by_id, links, forest, NOW))
 
@@ -78,7 +78,7 @@ def column(strip, key):
 
 def rows(lists, key):
     """(dom id, classes) of each ticket row in the list of group `key`, top to bottom."""
-    m = re.search(rf'<section class="mod tickets" id="{element_id("g", key)}".*?</section>', lists, re.S)
+    m = re.search(rf'<section class="mod tickets" id="{element_id("g", key)}".*?</section></div></section>', lists, re.S)
     assert m, key
     return re.findall(r'<article class="tk ([^"]*)" id="([^"]+)"', m.group(0))
 
@@ -95,14 +95,14 @@ class EpicStripTest(unittest.TestCase):
         strip, _ = board(EPIC + [ticket("quiet", type="epic"), ticket("q1", parent="quiet")])
         self.assertTrue(strip.startswith('<section id="epics" class="mod">'))
         self.assertEqual(len(re.findall(r'<button class="epic', strip)), 1)
-        self.assertIn("<small>1 epic · 1 in progress</small>", strip)
+        self.assertIn("<small>1 epic · 1 live · 0 stale</small>", strip)
 
     def test_a_column_shows_the_epic_id_priority_title_and_counts(self):
         col = column(board(EPIC)[0], "ter-89xq")
         self.assertIn('<span class="ep-id">ter-89xq</span>', col)
         self.assertIn('<span class="prio p1">P1</span>', col)
         self.assertIn('<span class="ep-title">Light budget</span>', col)
-        self.assertIn("<b>1</b> in progress · 1 ready · 1 blocked · 1 closed", col)
+        self.assertIn("<b>1</b> live · 1 ready · 1 blocked · 0 stale · 1 closed", col)
         self.assertIn('<span class="tags">lights</span>', col)
 
     def test_a_column_lists_its_tickets_in_progress_with_their_agents(self):
@@ -147,7 +147,7 @@ class EpicStripTest(unittest.TestCase):
 
     def test_an_empty_strip_says_that_no_ticket_is_in_progress(self):
         strip, _ = board([ticket("a")])
-        self.assertIn('<p class="empty">No ticket is in progress.</p>', strip)
+        self.assertIn('<p class="empty">No ticket is live or in progress.</p>', strip)
 
 
 class AgentLinkTest(unittest.TestCase):
@@ -189,6 +189,80 @@ class AgentLinkTest(unittest.TestCase):
             self.assertIn("var(--focus-hue)", rule.group(1))
 
 
+# EPIC plus a stale claim and a chain of two tickets under ter-69s8, whose leaf
+# an agent works on.
+LIVE = EPIC + [ticket("ter-old", "Old claim", "in_progress", parent="ter-89xq", changed=60 * 48),
+               ticket("ter-sub", "Sub", "open", parent="ter-69s8", priority=1),
+               ticket("ter-leaf", "Leaf", "open", parent="ter-sub")]
+LEAF_WORKER = [thread("t1", "ter-leaf: build")]
+
+
+def tier_names(lists, key):
+    m = re.search(rf'<section class="mod tickets" id="{element_id("g", key)}".*?</section></div></section>', lists, re.S)
+    return re.findall(r'<section class="tier (\w+)"', m.group(0))
+
+
+class TierTest(unittest.TestCase):
+    def test_a_ticket_falls_in_one_tier_by_its_agents_status_change_and_dependencies(self):
+        tickets = {t.id: t for t in [
+            ticket("named"), ticket("fresh", status="in_progress", changed=60 * 23),
+            ticket("old", status="in_progress", changed=60 * 25), ticket("dep"),
+            ticket("waits", deps=["dep"]), ticket("named-waits", deps=["dep"])]}
+        links = {"named": ["t1"], "named-waits": ["t1"]}
+        self.assertEqual({i: ticket_tier(t, tickets, links, NOW) for i, t in tickets.items()},
+                         {"named": "agent", "fresh": "recent", "old": "stale", "dep": "ready",
+                          "waits": "blocked", "named-waits": "agent"})
+
+    def test_the_list_runs_its_tiers_from_the_bottom_up(self):
+        _, lists = board(LIVE, LEAF_WORKER)
+        self.assertEqual(tier_names(lists, "ter-89xq"), ["agent", "recent", "ready", "blocked", "stale"])
+        self.assertRegex(CSS, r"\.tiers \{[^}]*flex-direction: column-reverse")
+
+    def test_each_tier_has_a_heading(self):
+        _, lists = board(LIVE, LEAF_WORKER)
+        for head in ("An agent works on it", "In progress, changed in 24 hours", "Ready", "Blocked"):
+            self.assertIn(f'<h3 class="tier-head">{head}</h3>', lists)
+
+    def test_a_tier_lists_its_most_relevant_ticket_last_next_to_the_strip(self):
+        _, lists = board(LIVE, LEAF_WORKER)
+        ready = [dom for cls, dom in rows(lists, "ter-89xq") if cls.startswith("ready")]
+        self.assertEqual(ready, [element_id("t", "ter-aaaa"), element_id("t", "ter-sub")])
+
+    def test_stale_claims_fold_into_one_line_that_a_click_opens(self):
+        _, lists = board(LIVE, LEAF_WORKER)
+        self.assertIn('<section class="tier stale"><button class="fold" data-on:click="$stale = !$stale">'
+                      '1 stale claim: in progress, no agent, no change in 24 hours</button>'
+                      '<div data-show="$stale" style="display:none"><article class="tk stale', lists)
+
+    def test_a_live_row_shows_the_path_from_the_group_root(self):
+        _, lists = board(LIVE, LEAF_WORKER)
+        self.assertIn('<span class="tk-path">ter-69s8 › ter-sub</span>', row(lists, "ter-leaf"))
+        self.assertNotIn('tk-path', row(lists, "ter-69s8"))
+        self.assertNotIn('tk-path', row(lists, "ter-aaaa"))
+
+    def test_a_tier_without_tickets_is_left_out(self):
+        self.assertEqual(tier_names(board(EPIC)[1], "ter-89xq"), ["recent", "ready", "blocked"])
+
+    def test_a_column_counts_live_ready_blocked_stale_and_closed(self):
+        strip, _ = board(LIVE, LEAF_WORKER)
+        self.assertIn("<b>2</b> live · 2 ready · 1 blocked · 1 stale · 1 closed", column(strip, "ter-89xq"))
+        self.assertIn("<small>1 epic · 2 live · 1 stale</small>", strip)
+
+    def test_a_column_lists_its_live_tickets_agent_work_first(self):
+        col = column(board(LIVE, LEAF_WORKER)[0], "ter-89xq")
+        self.assertEqual(re.findall(r'class="now-item".*?<span class="tk-id">([^<]+)', col), ["ter-leaf", "ter-69s8"])
+
+    def test_columns_with_more_agents_come_first(self):
+        strip, _ = board([ticket("e1", type="epic", created=900), ticket("a", status="in_progress", parent="e1"),
+                          ticket("e2", type="epic", created=100), ticket("b", "open", parent="e2")],
+                         [thread("t1", "b: build")])
+        self.assertEqual(re.findall(r'<span class="ep-id">([^<]+)', strip), ["e2", "e1"])
+
+    def test_a_group_whose_only_live_ticket_is_open_with_an_agent_shows(self):
+        strip, _ = board([ticket("e", type="epic"), ticket("x", "open", parent="e")], [thread("t1", "x: build")])
+        self.assertEqual(re.findall(r'<span class="ep-id">([^<]+)', strip), ["e"])
+
+
 class TicketListTest(unittest.TestCase):
     def test_the_lists_are_their_own_fragment_one_hidden_list_per_group(self):
         _, lists = board(EPIC)
@@ -197,10 +271,10 @@ class TicketListTest(unittest.TestCase):
         self.assertIn(f'<section class="mod tickets" id="{key}" data-show="$epic == \'{key}\'" '
                       'style="display:none">', lists)
 
-    def test_rows_are_in_progress_then_ready_then_blocked(self):
+    def test_rows_carry_their_tier_and_come_in_tier_order(self):
         _, lists = board(EPIC)
         self.assertEqual([(cls.split()[0], dom) for cls, dom in rows(lists, "ter-89xq")],
-                         [("in_progress", element_id("t", "ter-69s8")),
+                         [("recent", element_id("t", "ter-69s8")),
                           ("ready", element_id("t", "ter-aaaa")),
                           ("blocked", element_id("t", "ter-bqun"))])
 
@@ -310,22 +384,22 @@ class PageTest(unittest.TestCase):
     def test_the_body_declares_three_signals_and_holds_three_fragments(self):
         html = page('<main id="app"></main>', '<section id="epics"></section>', '<div id="tickets"></div>')
         body = re.search(r"<body[^>]*>", html).group(0)
-        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', peek: '', pin: '', pinat: '', now: Date.now() / 1000}\"", body)
+        self.assertIn("data-signals=\"{focus: '', hue: '', epic: '', peek: '', pin: '', pinat: '', stale: false, now: Date.now() / 1000}\"", body)
         self.assertLess(html.index('id="app"'), html.index('id="tickets"'))
         self.assertLess(html.index('id="tickets"'), html.index('id="epics"'))
 
 
 class MarkupTest(unittest.TestCase):
     def test_the_fragments_are_well_formed_and_every_class_has_a_style(self):
-        strip, lists = board(EPIC + [ticket("lone", status="in_progress")],
-                             [thread("t1", "ter-69s8: build")])
+        strip, lists = board(LIVE + [ticket("lone", status="in_progress")],
+                             [thread("t1", "ter-69s8: build"), thread("t2", "ter-leaf: build", created=50)])
         classes = set()
         for html in (strip, lists, ticket_peek(EPIC[4], pinned=True), ticket_peek(EPIC[1]), ticket_peek(EPIC[0]), board([])[0]):
             c = check(html)
             self.assertEqual(c.errors, [])
             classes |= c.classes
         # Row states that keep the default look on purpose.
-        self.assertEqual(classes - CSS_CLASSES - {"in_progress", "ready"}, set())
+        self.assertEqual(classes - CSS_CLASSES - {"ready"}, set())
 
     def test_ticket_text_is_escaped(self):
         strip, lists = board([ticket("x", "<b>t</b>", "in_progress", body="<script>", tags=["<i>"])])

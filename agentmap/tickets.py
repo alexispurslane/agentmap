@@ -333,8 +333,11 @@ def blocked_by(ticket: Ticket, tickets: Mapping[str, Ticket]) -> tuple[str, ...]
     return tuple(d for d in ticket.deps if d in tickets and tickets[d].status in OPEN)
 
 
-def groups(tickets: Mapping[str, Ticket]) -> list[Group]:
-    """The active groups: those with at least one member in progress.
+def groups(tickets: Mapping[str, Ticket],
+           active: Callable[[Ticket], bool] | None = None) -> list[Group]:
+    """The active groups: those with at least one member for which `active` is true.
+
+    By default, a member is active if it is in progress.
 
     Each ticket belongs to the group of its nearest ancestor of type epic. An
     inner epic is thus a member of its parent epic's group, and it heads its
@@ -349,10 +352,12 @@ def groups(tickets: Mapping[str, Ticket]) -> list[Group]:
         epic = _epic_above(t, tickets)
         if epic is not None or t.type != "epic":
             found.setdefault(epic, []).append(t)
+    if active is None:
+        active = lambda t: t.status == "in_progress"  # noqa: E731
     result = []
     for root, belonging in found.items():
         members = [t for t in belonging if t.status != "closed"]
-        if any(t.status == "in_progress" for t in members):
+        if any(active(t) for t in members):
             members.sort(key=lambda t: _member_key(t, tickets))
             result.append(Group(tickets[root] if root is not None else None, tuple(members),
                                 len(belonging) - len(members)))
