@@ -43,6 +43,11 @@ def app(threads, plans=None, cells=CELLS):
     return render_app(threads, plans or {}, cells, NOW, "demo")
 
 
+def hue_of(html, tag):
+    """The hue, in degrees, of the card with the given tag."""
+    return float(re.search(r'--hue:\s*([0-9.]+)', card(html, tag)).group(1))
+
+
 def card(html, tag):
     """The HTML of the card with the given tag, up to the next card."""
     m = re.search(rf'<article[^>]*data-tag="{re.escape(tag)}".*?</article>', html, re.S)
@@ -92,13 +97,37 @@ class TagTest(unittest.TestCase):
         html = app([thread("root"), thread("kid", "root")])
         self.assertIn('data-tag="A1"', card(html, "A"))
 
-    def test_descendants_share_the_hue_of_their_root(self):
+    def test_every_thread_has_its_own_hue_even_a_subagent(self):
         html = app([thread("r1", created=90), thread("r2", created=80),
-                    thread("k", "r2"), thread("g", "k")])
-        hue = lambda tag: re.search(r'--hue:\s*([^;"]+)', card(html, tag)).group(1)
-        self.assertNotEqual(hue("A"), hue("B"))
-        self.assertEqual(hue("B"), hue("B1"))
-        self.assertEqual(hue("B"), hue("B1.1"))
+                    thread("k", "r2", created=70), thread("g", "k", created=60)])
+        hues = {tag: hue_of(html, tag) for tag in ("A", "B", "B1", "B1.1")}
+        self.assertEqual(len(set(hues.values())), 4, hues)
+
+    def test_up_to_eight_threads_have_hues_at_least_30_degrees_apart(self):
+        html = app([thread(f"t{i}", created=100 - i) for i in range(8)])
+        hues = [hue_of(html, tag) for tag in "ABCDEFGH"]
+        gaps = [min(abs(a - b), 360 - abs(a - b)) for i, a in enumerate(hues) for b in hues[i + 1:]]
+        self.assertGreaterEqual(min(gaps), 30)
+
+    def test_up_to_twelve_threads_have_hues_at_least_20_degrees_apart(self):
+        html = app([thread(f"t{i}", created=100 - i) for i in range(12)])
+        hues = [hue_of(html, tag) for tag in "ABCDEFGHIJKL"]
+        gaps = [min(abs(a - b), 360 - abs(a - b)) for i, a in enumerate(hues) for b in hues[i + 1:]]
+        self.assertGreaterEqual(min(gaps), 20)
+
+    def test_a_new_thread_does_not_change_the_hues_of_older_threads(self):
+        before = app([thread("r", created=90), thread("k", "r", created=80)])
+        after = app([thread("r", created=90), thread("k", "r", created=80),
+                     thread("new", "r", created=1)])
+        for tag in ("A", "A1"):
+            self.assertEqual(hue_of(before, tag), hue_of(after, tag))
+
+    def test_a_childs_guide_line_takes_the_parents_hue(self):
+        html = app([thread("r", created=90), thread("k", "r", created=80)])
+        parent = card(html, "A")
+        kids_div = re.search(r'<div class="kids"[^>]*>', parent).group(0)
+        self.assertNotIn("--hue", kids_div)
+        self.assertLess(parent.index('style="--hue:'), parent.index('<div class="kids"'))
 
 
 class MapTest(unittest.TestCase):
@@ -255,11 +284,6 @@ class EdgeTest(unittest.TestCase):
         self.assertIn("Thread r26", card(html, "AA"))
         self.assertIn("Thread r27", card(html, "AB"))
 
-    def test_hues_repeat_after_the_palette_ends(self):
-        html = app([thread(f"r{i}", created=100 - i) for i in range(9)])
-        hue = lambda tag: re.search(r'--hue:\s*([^;"]+)', card(html, tag)).group(1)
-        self.assertEqual(hue("A"), hue("I"))
-
     def test_a_cell_with_a_working_thread_is_marked_busy(self):
         html = app([thread("w", touched=["docs/a"]), thread("i", state="idle", touched=["src/a/x"])])
         self.assertRegex(html, r'class="cell d1 busy"[^>]*data-cell="docs"')
@@ -382,8 +406,8 @@ class MarkupTest(unittest.TestCase):
 
     def test_a_dot_has_the_hue_of_its_card(self):
         html = self.scene()
-        card_hue = re.search(r'data-tag="A" style="--hue:(\d+)"', html).group(1)
-        dot_hue = re.search(r'class="dot [a-z-]+" style="--hue:(\d+)">A<', html).group(1)
+        card_hue = re.search(r'data-tag="A" style="--hue:([0-9.]+)"', html).group(1)
+        dot_hue = re.search(r'class="dot [a-z-]+" style="--hue:([0-9.]+)">A<', html).group(1)
         self.assertEqual(card_hue, dot_hue)
 
 

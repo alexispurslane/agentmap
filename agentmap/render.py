@@ -21,7 +21,11 @@ MAP_W = 1080.0
 MAP_H = 600.0
 
 # OKLCH hue angles, one per root thread, in order of creation.
-HUES = (75, 230, 150, 320, 25, 190, 280, 110)
+# Each thread gets its own OKLCH hue. In order of creation, each hue is the
+# one before plus the golden angle, so threads close in that order get hues
+# far apart: at least 32 degrees for 8 threads, 20 for 12.
+FIRST_HUE = 75.0
+GOLDEN_ANGLE = 137.50776405
 
 # An idle child that is quiet for longer than this shows as one line.
 COMPACT_AFTER = timedelta(minutes=10)
@@ -84,16 +88,16 @@ class _Forest:
             self.children[parent].append(t)
         self.roots = self.children[None]
         self.tag: dict[str, str] = {}
-        self.hue: dict[str, int] = {}
+        self.hue = {t.id: round((FIRST_HUE + i * GOLDEN_ANGLE) % 360, 1)
+                    for i, t in enumerate(order)}
         for i, root in enumerate(self.roots):
-            self._assign(root, _letters(i), HUES[i % len(HUES)])
+            self._assign(root, _letters(i))
 
-    def _assign(self, t: AgentThread, tag: str, hue: int) -> None:
+    def _assign(self, t: AgentThread, tag: str) -> None:
         self.tag[t.id] = tag
-        self.hue[t.id] = hue
         sep = "." if any(ch.isdigit() for ch in tag) else ""
         for i, kid in enumerate(self.children[t.id], start=1):
-            self._assign(kid, f"{tag}{sep}{i}", hue)
+            self._assign(kid, f"{tag}{sep}{i}")
 
     def walk(self):
         """All threads, parents before children, in tag order."""

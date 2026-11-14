@@ -276,7 +276,9 @@ def render_app(threads: list[AgentThread], plans: dict[str, Plan], cells: list[C
 
 - `render_page` returns the whole document. The body has `data-init="@get('/stream', {openWhenHidden: true})"`.
 - `render_app` returns one `<main id="app">` element with `<section id="map">` and `<section id="tree">`.
-- Each root thread gets a hue from a fixed palette of 8 hues, in the order of `created_at`. Its descendants use the same hue.
+- Each thread gets its own hue, subagents included. In order of creation, each hue is the one before plus the golden angle (137.5°). Up to 8 threads, two hues are at least 32° apart.
+- A card's list of subagents has a thin guide line in the card's own hue. The line shows ownership.
+- A dot and its card are linked by the frontend signal `$hover`. Each sets it to its tag while the pointer is on it, and each gets the class `hl` while `$hover` holds its tag.
 - Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`. The tag shows on the dot and on the card, so that the reader can match them.
 - A dot sits in the cell of the thread's newest touched path. Dots in one cell sit on a small grid inside the cell, in tag order. A thread without a touched path has no dot.
 - A card shows the tag, title, provider and model, state, age, now line, thought, last said, status line and plan.
