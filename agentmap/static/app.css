@@ -58,13 +58,14 @@ body { font: 16px/1.4 var(--sans); }
 
 /* Tree */
 #tree { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
-.card {
-  border-left: 4px solid oklch(.78 .14 var(--hue));
-  background: var(--panel); border-radius: 6px; padding: 8px 10px 8px 12px;
-}
+.card { background: var(--panel); border-radius: 6px; padding: 8px 10px; }
 .card .card { background: var(--panel-2); }
 .card > header { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.tag { font: 700 13px var(--mono); color: oklch(.82 .13 var(--hue)); flex: none; }
+/* The tag looks like the thread's dot on the map, so the eye can match them. */
+.tag {
+  font: 700 12px/1 var(--mono); padding: 4px 6px; border-radius: 999px; flex: none;
+  background: oklch(.80 .14 var(--hue)); color: #111; align-self: center;
+}
 .title { margin: 0; font-size: 16px; font-weight: 620; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .state { font: 13px var(--mono); color: var(--muted); flex: none; }
 .card.working > header .state { color: var(--ok); }
@@ -95,6 +96,10 @@ body { font: 16px/1.4 var(--sans); }
 .item.doing > .items { color: var(--text); }
 .count { color: var(--muted); }
 
-.kids { margin-top: 8px; padding-left: 10px; display: flex; flex-direction: column; gap: 6px; }
+/* The guide line shows ownership: every card right of it belongs to the card above. */
+.kids {
+  margin-top: 8px; margin-left: 4px; padding-left: 10px; display: flex; flex-direction: column; gap: 6px;
+  border-left: 1.5px solid oklch(.78 .14 var(--hue) / .35);
+}
 
 .empty { color: var(--faint); font-style: italic; margin: 12px; }
