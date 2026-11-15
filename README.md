@@ -28,6 +28,8 @@ The tree has one card per thread. A subagent's card sits inside the card of the 
 - The newest thought, message or status line.
 - The provider, the model and the start time.
 
+A click on a card's title opens the thread in the T3 Code app.
+
 A card's ink fades from the agent's last act, so quiet threads turn gray. After its task ends, a subagent leaves the tree. After you settle a thread in T3 Code, the thread leaves too. A failed thread stays, so that you see the failure.
 
 ![The agent tree with nested subagents](docs/screenshots/agents.png)
@@ -147,6 +149,7 @@ The board updates itself. These are the things that you can do on it:
 | Hover over an agent's dot, card or event | Its route, dot, card, events, tickets and map areas light up. |
 | Hover over a ticket, an epic or a map area | Its agents light up, each in its own color. |
 | Hover over a ticket or a map area | A box opens with the ticket's text or the area's files. |
+| Click an agent's title in the tree | The thread opens in the T3 Code app. |
 | Click a ticket or a map area | The box stays open (pinned). Click again, click ✕ or press Escape to close it. |
 | Click an epic in the strip | Its ticket list opens in the place of the event log. Click ✕ to close it. |
 | Click the stale claims line | The folded stale tickets open. |

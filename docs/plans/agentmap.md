@@ -175,6 +175,7 @@ class T3Reader:
 | `thought` | The first sentence of the newest thinking text, at most 160 characters, or `None`. |
 | `last_said` | The first sentence of the newest assistant message, at most 160 characters, or `None`. |
 | `thought_at`, `said_at` | The `startedAt` time of the item that `thought` or `last_said` came from. `None` when that text is `None`. |
+| `app_url` | The link `t3code://threads/<environment id>/<thread id>`, which opens the thread in the T3 Code app. The environment id is the text of the file `environment-id` beside the database. Each part is percent-encoded, as T3 Code's `encodeURIComponent` does, because T3 Code decodes the parts once and a subagent's id holds `:` and `%3A`. `None` if that file is missing or empty. |
 | `touched` | Up to 8 `Touch(path, at)` values, newest first, without repeated paths. `at` is the `startedAt` time of the newest item that touched the path. |
 
 All times are timezone-aware UTC.
@@ -280,6 +281,7 @@ def locate(cells: list[Cell], rel_path: str) -> Cell | None: ...
 - Map routes and agent rows fade in real time. The page keeps the Unix time in the signal `$now` and sets it every 10 seconds. The `fade` component gives a mark the attribute `data-style:--fade`. Its value grows from 0 at the mark's time to 1 after an hour, as the square root of the age.
 - In the CSS, a route segment and a stop lose opacity at a steady rate (`1 - --fade²`) and are gone after an hour. The newest segment, the one that ends at the dot, starts in the full color of the thread and fades from full opacity in the same way. A hover on a thread draws its whole route at full color.
 - An agent row fades from its `active_at`, and its idle age counts from the same time. A row that is working or that needs the user has full ink, because its agent acts now. Its title and summary text mix from full ink to grey with `--fade`. Its tag badge gets a little lighter and less saturated, so that the tags stay readable and distinct.
+- An agent row's title is a link to `app_url`. A click opens the thread in the T3 Code app. The link keeps the title's ink and fade, and it shows an underline in the thread's color only on hover. A thread without `app_url` has a plain title.
 - The event log, the epic strip and the ticket list still use the ink ramp `a0` to `a4`, which the server sets when it renders.
 - Each thread gets a tag: the root gets a letter (`A`, `B`, ...). A child gets its parent's tag plus its position, for example `B2` and `B2.1`.
 - An agent row shows its tool line (the now line) and one summary line: the newest of its status line, its last message and its newest thought.

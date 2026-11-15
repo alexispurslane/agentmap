@@ -251,6 +251,9 @@ body {
 .row .meta { grid-column: 2 / 5; font-size: 13px; color: var(--faint); }
 .row.compact { padding-top: 5px; padding-bottom: 5px; }
 .row.compact .title { font-size: 15px; font-weight: 400; }
+/* A title opens its thread in the T3 Code app. It keeps the title's ink and fade. */
+.row .title a { color: inherit; text-decoration: none; }
+.row .title a:hover { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: oklch(var(--h-tag) var(--hue)); }
 .row.hl { background: oklch(var(--h-row) var(--hue)); box-shadow: inset 3px 0 0 oklch(var(--h-accent) var(--hue)); }
 .kids { grid-column: 1 / 5; margin: 6px -10px -9px 22px; border-left: 1px solid var(--rule); }
 .kids > .row:last-child { border-bottom: 0; }

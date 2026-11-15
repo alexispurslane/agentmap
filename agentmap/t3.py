@@ -42,6 +42,7 @@ import re
 import shlex
 import sqlite3
 import threading
+from urllib.parse import quote
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -89,7 +90,9 @@ class AgentThread:
     is when the thread's agent last acted: the latest start or end of its
     newest ACTIVE_SCAN turn items, or `created_at` for a thread without items.
     It differs from `updated_at`, which T3 Code also moves without agent work,
-    for example when it settles the thread.
+    for example when it settles the thread. `app_url` is the `t3code:` link
+    that opens the thread in the T3 Code app, or None when the reader does not
+    know the T3 Code environment.
     """
 
     id: str
@@ -109,6 +112,30 @@ class AgentThread:
     delegation: str | None = None
     settled_at: datetime | None = None
     active_at: datetime | None = None
+    app_url: str | None = None
+
+
+def _environment_id(db_path: Path) -> str | None:
+    """The id of the T3 Code environment that owns the database, or None.
+
+    T3 Code keeps it in the file `environment-id` beside the database. The
+    app's thread links name the environment and the thread.
+    """
+    try:
+        text = (Path(db_path).parent / "environment-id").read_text().strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def _app_url(environment: str, thread_id: str) -> str:
+    """The link that opens a thread in the T3 Code app.
+
+    T3 Code builds its own thread links with encodeURIComponent on each part,
+    and its router decodes them once. A subagent's id holds ':' and '%3A'.
+    """
+    parts = (quote(environment, safe=""), quote(thread_id, safe=""))
+    return "t3code://threads/{}/{}".format(*parts)
 
 
 @dataclass(frozen=True)
@@ -170,6 +197,7 @@ class T3Reader:
         self._root = posixpath.normpath(str(Path(project_root).absolute()))
         self._anchors = anchors
         self._window = window
+        self._environment = _environment_id(db_path)
         uri = Path(db_path).absolute().as_uri() + "?mode=ro"
         self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False,
                                      isolation_level=None)
@@ -343,7 +371,8 @@ class T3Reader:
             last_said=_text_of(details.said), thought_at=_time_of(details.thought),
             said_at=_time_of(details.said), touched=details.touched,
             delegation=self._delegation(thread_id), settled_at=_settled_at(payload),
-            active_at=details.active_at or _parse(created_at))
+            active_at=details.active_at or _parse(created_at),
+            app_url=self._environment and _app_url(self._environment, thread_id))
 
     def _delegation(self, thread_id: str) -> str | None:
         """The status of the newest delegation record whose child is this thread.

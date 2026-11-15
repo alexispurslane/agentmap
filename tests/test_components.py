@@ -35,7 +35,7 @@ def fades(minutes):
 def thread(id, parent=None, *, title=None, created=60, updated=0, state="working",
            now=None, thought=None, thought_at=None, last_said=None, said_at=None,
            touched=(), provider="claude", model="claude-opus-5-5", delegation=None,
-           settled_at=None, active=None):
+           settled_at=None, active=None, app_url=None):
     """A thread created `created` and updated `updated` minutes before NOW.
 
     Its agent last acted `active` minutes before NOW, by default when it was updated.
@@ -50,7 +50,7 @@ def thread(id, parent=None, *, title=None, created=60, updated=0, state="working
         now=now, thought=thought, thought_at=None if thought_at is None else ago(thought_at),
         last_said=last_said, said_at=None if said_at is None else ago(said_at), touched=touches,
         delegation=delegation, settled_at=None if settled_at is None else ago(settled_at),
-        active_at=ago(updated if active is None else active))
+        active_at=ago(updated if active is None else active), app_url=app_url)
 
 
 def status(text, minutes=0):
@@ -426,6 +426,14 @@ class SummaryTest(unittest.TestCase):
 
 
 class AgentRowTest(unittest.TestCase):
+    def test_a_title_links_to_the_thread_in_t3_code(self):
+        r = row(render([thread("t", title="Fix the cap", app_url="t3code://threads/e/t")]), "A")
+        self.assertIn('<h3 class="title"><a href="t3code://threads/e/t">Fix the cap</a></h3>', r)
+
+    def test_a_thread_without_a_link_has_a_plain_title(self):
+        self.assertIn('<h3 class="title">Fix the cap</h3>',
+                      row(render([thread("t", title="Fix the cap")]), "A"))
+
     def test_a_working_row_shows_its_tool_call_and_its_newest_summary(self):
         r = row(render([thread("t", now="Editing src/a/x.py", thought="The cap goes first.",
                                thought_at=0, last_said="Old news.", said_at=20)]), "A")

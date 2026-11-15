@@ -389,6 +389,31 @@ class ActiveAt(unittest.TestCase):
         self.assertEqual(self.active_at(), NOW - timedelta(minutes=60))
 
 
+class AppUrl(unittest.TestCase):
+    """`app_url` is the link that opens the thread in the T3 Code app."""
+
+    def app_url(self, environment=None, thread_id="t"):
+        f = Fixture(self)
+        if environment is not None:
+            (f.path.parent / "environment-id").write_text(environment)
+        f.thread(thread_id, updated=1)
+        return by_id(f.reader(self).snapshot(NOW))[thread_id].app_url
+
+    def test_it_names_the_environment_beside_the_database_and_the_thread(self):
+        self.assertEqual(self.app_url("env-1\n"), "t3code://threads/env-1/t")
+
+    def test_it_encodes_each_part_as_t3_code_does(self):
+        # T3 Code decodes the parts once, and a subagent's id holds ':' and '%3A'.
+        self.assertEqual(self.app_url("env 1", "thread:task:command%3Amcp"),
+                         "t3code://threads/env%201/thread%3Atask%3Acommand%253Amcp")
+
+    def test_a_database_without_an_environment_id_gives_no_link(self):
+        self.assertIsNone(self.app_url())
+
+    def test_an_empty_environment_id_gives_no_link(self):
+        self.assertIsNone(self.app_url("  \n"))
+
+
 class NativeSubagentState(unittest.TestCase):
     """A subagent from Claude's Agent tool has no runs. Its parent's subagent item stands for its run."""
 
