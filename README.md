@@ -28,11 +28,15 @@ The tree has one card per thread. A subagent's card sits inside the card of the 
 - The newest thought, message or status line.
 - The provider, the model and the start time.
 
-A click on a card's title opens the thread in the T3 Code app.
-
 A card's ink fades from the agent's last act, so quiet threads turn gray. After its task ends, a subagent leaves the tree. After you settle a thread in T3 Code, the thread leaves too. A failed thread stays, so that you see the failure.
 
 ![The agent tree with nested subagents](docs/screenshots/agents.png)
+
+### Open a thread in T3 Code
+
+A click on a card's title opens that thread in the T3 Code app, subagents too. The title keeps its ink, and it shows an underline in the agent's color under the pointer. The first click in a browser can ask if it can open T3 Code.
+
+![An agent card with an underlined title under the pointer](docs/screenshots/thread-link.png)
 
 ### Cross-highlighting
 
